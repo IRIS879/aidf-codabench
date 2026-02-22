@@ -357,22 +357,23 @@ class Run:
             "ingestion_only_during_scoring"
         )
         self.detailed_results_url = run_args.get("detailed_results_url")
-        # --- TEMP HARDCODE (remove later when UI toggle is ready) ---
-        # self.rolling_enabled = bool(run_args.get("rolling_enabled", False))
-        # self.rolling_start_year = run_args.get("START_YEAR", run_args.get("start_year"))
-        # self.rolling_end_year = run_args.get("END_YEAR", run_args.get("end_year"))
-        # self.rolling_year_col = run_args.get("year_col", "year")
-        # self.rolling_window_size = int(run_args.get("rolling_window_size", 2))
         self.rolling_enabled = True
-        self.rolling_start_year = 2018
-        self.rolling_end_year = 2019
-        self.rolling_window_size = 2
-        self.rolling_year_col = "yyyy"
+        self.rolling_start_year = run_args.get(
+            "rolling_start_year", run_args.get("start_year", 2018)
+        )
+        self.rolling_end_year = run_args.get(
+            "rolling_end_year", run_args.get("end_year", 2019)
+        )
+        self.rolling_window_size = int(
+            run_args.get("window_size", run_args.get("rolling_window_size", 2))
+        )
+        self.rolling_year_col = run_args.get("year_col", "yyyy")
 
         # During prediction program will be the submission program, during scoring it will be the
         # scoring program
         self.program_exit_code = None
         self.ingestion_program_exit_code = None
+        self.combined_scores = None
 
         self.program_elapsed_time = None
         self.ingestion_elapsed_time = None
@@ -1158,6 +1159,62 @@ class Run:
                 src_path, test_path, self.rolling_year_col, lambda y: y == year
             )
 
+    def _slice_input_data_by_predicates(
+        self, round_input_dir, train_predicate, test_predicate
+    ):
+        master_dir = os.path.join(self.root_dir, "input_data")
+        files = list(self._list_files(master_dir))
+        has_split_markers = any(
+            "train" in os.path.basename(path).lower()
+            or "test" in os.path.basename(path).lower()
+            for path, _ in files
+            if path.lower().endswith(".csv")
+        )
+
+        for src_path, rel_path in files:
+            lower_name = os.path.basename(src_path).lower()
+            is_csv = src_path.lower().endswith(".csv")
+
+            if not is_csv:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                continue
+
+            if has_split_markers:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                if "train" in lower_name:
+                    self._slice_csv_by_year(
+                        src_path,
+                        dst_path,
+                        self.rolling_year_col,
+                        train_predicate,
+                    )
+                elif "test" in lower_name:
+                    self._slice_csv_by_year(
+                        src_path,
+                        dst_path,
+                        self.rolling_year_col,
+                        test_predicate,
+                    )
+                else:
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+                continue
+
+            base_dir = os.path.dirname(rel_path)
+            base_name = os.path.basename(rel_path)
+            train_name = f"train_{base_name}"
+            test_name = f"test_{base_name}"
+            train_path = os.path.join(round_input_dir, base_dir, train_name)
+            test_path = os.path.join(round_input_dir, base_dir, test_name)
+            self._slice_csv_by_year(
+                src_path, train_path, self.rolling_year_col, train_predicate
+            )
+            self._slice_csv_by_year(
+                src_path, test_path, self.rolling_year_col, test_predicate
+            )
+
     def _slice_reference_data(self, round_ref_dir, year):
         master_dir = os.path.join(self.root_dir, "input", "ref")
         for src_path, rel_path in self._list_files(master_dir):
@@ -1181,6 +1238,32 @@ class Run:
         self._slice_reference_data(round_ref_dir, year)
         self._merge_train_with_labels(round_input_dir, round_ref_dir)
         return round_input_dir, round_ref_dir
+
+    def _prepare_static_data(self, start_year, end_year):
+        round_input_dir = os.path.join(self.root_dir, "input_data_static")
+        round_ref_dir = os.path.join(self.root_dir, "input_ref_static")
+        self._ensure_clean_dir(round_input_dir)
+        self._ensure_clean_dir(round_ref_dir)
+
+        train_start = start_year - self.rolling_window_size
+        train_end = start_year - 1
+        self._slice_input_data_by_predicates(
+            round_input_dir,
+            lambda y: train_start <= y <= train_end,
+            lambda y: start_year <= y <= end_year,
+        )
+        self._merge_train_with_labels(round_input_dir, round_ref_dir)
+        return round_input_dir, round_ref_dir
+
+    def _count_csv_rows(self, path):
+        if not os.path.exists(path):
+            return 0
+        with open(path, newline="") as src_file:
+            reader = csv.reader(src_file)
+            header = next(reader, None)
+            if header is None:
+                return 0
+            return sum(1 for _ in reader)
 
     def _pick_one_csv(self, paths, kind):
         paths = [p for p in paths if os.path.basename(p) and not os.path.basename(p).startswith("._")]
@@ -1391,50 +1474,218 @@ class Run:
         u = rank_sum - (n_pos * (n_pos + 1)) / 2.0
         return u / (n_pos * n_neg)
 
+    def _infer_join_cols(self, pred_cols, ref_cols):
+        preferred = ["CompNo", "yyyy", "mm"]
+        if all(col in pred_cols and col in ref_cols for col in preferred):
+            return preferred
+        join_cols = [col for col in pred_cols if col in ref_cols]
+        return join_cols
+
+    def _infer_label_col(self, ref_cols):
+        if "y_12m" in ref_cols:
+            return "y_12m"
+        for name in ref_cols:
+            lowered = name.lower()
+            if "y_" in lowered or "label" in lowered or "target" in lowered:
+                return name
+        return None
+
+    def _infer_pred_col(self, pred_cols):
+        if "p1" in pred_cols:
+            return "p1"
+        for name in pred_cols:
+            lowered = name.lower()
+            if "pred" in lowered or "score" in lowered or "prob" in lowered:
+                return name
+        return None
+
+    def _compute_metrics_from_predictions(self, pred_path, ref_path, start_year, end_year):
+        pred_cols = self._load_csv_header(pred_path)
+        ref_cols = self._load_csv_header(ref_path)
+
+        join_cols = self._infer_join_cols(pred_cols, ref_cols)
+        if not join_cols:
+            raise SubmissionException(
+                f"No join columns found between {pred_path} and {ref_path}. "
+                f"Pred cols={pred_cols} Ref cols={ref_cols}"
+            )
+
+        label_col = self._infer_label_col(ref_cols)
+        if not label_col:
+            raise SubmissionException(
+                f"Could not identify label column in {ref_path}. Ref cols={ref_cols}"
+            )
+
+        pred_col = self._infer_pred_col(pred_cols)
+        if not pred_col:
+            raise SubmissionException(
+                f"Could not identify prediction column in {pred_path}. Pred cols={pred_cols}"
+            )
+
+        ref_map = {}
+        with open(ref_path, newline="") as ref_file:
+            reader = csv.DictReader(ref_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                try:
+                    year_val = int(float(row.get(self.rolling_year_col)))
+                except (TypeError, ValueError):
+                    continue
+                if year_val < start_year or year_val > end_year:
+                    continue
+                ref_map[key] = (row.get(label_col), year_val)
+
+        yearly = {year: {"y_true": [], "y_score": []} for year in range(start_year, end_year + 1)}
+        overall_y_true = []
+        overall_y_score = []
+
+        with open(pred_path, newline="") as pred_file:
+            reader = csv.DictReader(pred_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                if key not in ref_map:
+                    continue
+                label_raw, year_val = ref_map[key]
+                try:
+                    label_val = int(float(label_raw))
+                    score_val = float(row.get(pred_col))
+                except (TypeError, ValueError):
+                    continue
+                y_true = 1 if label_val == 1 else 0
+                yearly[year_val]["y_true"].append(y_true)
+                yearly[year_val]["y_score"].append(score_val)
+                overall_y_true.append(y_true)
+                overall_y_score.append(score_val)
+
+        yearly_auc = []
+        valid_aucs = []
+        for year in range(start_year, end_year + 1):
+            y_true = yearly[year]["y_true"]
+            y_score = yearly[year]["y_score"]
+            n_total = len(y_true)
+            n_pos = sum(1 for y in y_true if y == 1)
+            n_neg = n_total - n_pos
+            if n_total == 0:
+                yearly_auc.append(
+                    {
+                        "year": year,
+                        "auc": None,
+                        "n_total": 0,
+                        "n_pos": 0,
+                        "reason": "no_matches",
+                    }
+                )
+                continue
+            if n_pos == 0 or n_neg == 0:
+                yearly_auc.append(
+                    {
+                        "year": year,
+                        "auc": None,
+                        "n_total": n_total,
+                        "n_pos": n_pos,
+                        "reason": "zero_positive_or_negative",
+                    }
+                )
+                continue
+            auc = self._roc_auc_score(y_true, y_score)
+            yearly_auc.append(
+                {"year": year, "auc": auc, "n_total": n_total, "n_pos": n_pos}
+            )
+            if not math.isnan(auc):
+                valid_aucs.append(auc)
+
+        mean_yearly_auc = sum(valid_aucs) / len(valid_aucs) if valid_aucs else math.nan
+        overall_auc = self._roc_auc_score(overall_y_true, overall_y_score)
+
+        return {
+            "overall_auc": overall_auc,
+            "mean_yearly_auc": mean_yearly_auc,
+            "yearly_auc": yearly_auc,
+        }
+
+    def _write_yearly_auc_csv(self, path, yearly_auc):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", newline="") as out_file:
+            writer = csv.writer(out_file)
+            writer.writerow(["year", "auc", "n_total", "n_pos", "reason"])
+            for row in yearly_auc:
+                writer.writerow(
+                    [
+                        row.get("year"),
+                        row.get("auc"),
+                        row.get("n_total"),
+                        row.get("n_pos"),
+                        row.get("reason"),
+                    ]
+                )
+
     def _run_programs_once(
         self, program_dir, ingestion_program_dir, input_data_dir=None, input_ref_dir=None
     ):
         loop = asyncio.new_event_loop()
-        gathered_tasks = asyncio.gather(
-            self._run_program_directory(
-                program_dir,
-                kind="program",
-                input_data_dir=input_data_dir,
-                input_ref_dir=input_ref_dir,
-            ),
-            self._run_program_directory(
-                ingestion_program_dir,
-                kind="ingestion",
-                input_data_dir=input_data_dir,
-                input_ref_dir=input_ref_dir,
-            ),
-            self.watch_detailed_results(),
-            loop=loop,
-        )
-        loop.run_until_complete(gathered_tasks)
+        try:
+            async def run_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await asyncio.gather(
+                        self._run_program_directory(
+                            program_dir,
+                            kind="program",
+                            input_data_dir=input_data_dir,
+                            input_ref_dir=input_ref_dir,
+                        ),
+                        self._run_program_directory(
+                            ingestion_program_dir,
+                            kind="ingestion",
+                            input_data_dir=input_data_dir,
+                            input_ref_dir=input_ref_dir,
+                        ),
+                    )
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
+
+            loop.run_until_complete(run_with_watch())
+        finally:
+            loop.close()
 
     def _run_programs_sequential(
         self, program_dir, ingestion_program_dir, input_data_dir=None, input_ref_dir=None
     ):
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(
-            self._run_program_directory(
-                ingestion_program_dir,
-                kind="ingestion",
-                input_data_dir=input_data_dir,
-                input_ref_dir=input_ref_dir,
+        try:
+            loop.run_until_complete(
+                self._run_program_directory(
+                    ingestion_program_dir,
+                    kind="ingestion",
+                    input_data_dir=input_data_dir,
+                    input_ref_dir=input_ref_dir,
+                )
             )
-        )
-        self._sync_predictions_to_input_res()
-        loop.run_until_complete(
-            self._run_program_directory(
-                program_dir,
-                kind="program",
-                input_data_dir=input_data_dir,
-                input_ref_dir=input_ref_dir,
-            )
-        )
-        loop.run_until_complete(self.watch_detailed_results())
+            self._sync_predictions_to_input_res()
+
+            async def run_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await self._run_program_directory(
+                        program_dir,
+                        kind="program",
+                        input_data_dir=input_data_dir,
+                        input_ref_dir=input_ref_dir,
+                    )
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
+
+            loop.run_until_complete(run_with_watch())
+        finally:
+            loop.close()
 
     def _sync_predictions_to_input_res(self):
         pred_path = self._find_submission_file()
@@ -1561,22 +1812,69 @@ class Run:
             )
         return start_year, max_year
 
-    def _run_rolling_rounds(self, program_dir, ingestion_program_dir):
-        if not os.path.exists(ingestion_program_dir):
-            raise SubmissionException(
-                "Rolling requires an ingestion program during scoring; ingestion_program is missing."
+    def _run_static_baseline(self, ingestion_program_dir, start_year, end_year):
+        logger.info(
+            "Running static baseline: train years %s-%s, test years %s-%s",
+            start_year - self.rolling_window_size,
+            start_year - 1,
+            start_year,
+            end_year,
+        )
+        round_input_dir, round_ref_dir = self._prepare_static_data(start_year, end_year)
+        self._log_round_input_tree(round_input_dir, start_year)
+
+        train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+        test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
+        if train_candidates:
+            logger.info(
+                "Static train rows: %s", self._count_csv_rows(train_candidates[0])
             )
-        start_year, end_year = self._resolve_rolling_years()
-        logger.info(f"Rolling execution enabled: {start_year} -> {end_year}")
+        if test_candidates:
+            logger.info(
+                "Static test rows: %s", self._count_csv_rows(test_candidates[0])
+            )
 
-        yearly_scores = []
-        yearly_aucs = []
-        overall_y_true = []
-        overall_y_score = []
+        self.logs = {}
+        self.completed_program_counter = 0
+        self.watch = True
+        try:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self._run_program_directory(
+                        ingestion_program_dir,
+                        kind="ingestion",
+                        input_data_dir=round_input_dir,
+                        input_ref_dir=round_ref_dir,
+                    )
+                )
+            finally:
+                loop.close()
+        finally:
+            self._finalize_run_logs()
 
-        scores_root = os.path.join(self.output_dir, "rolling_scores")
-        os.makedirs(scores_root, exist_ok=True)
-        full_ref_dir = os.path.join(self.root_dir, "input", "ref")
+        self._sync_predictions_to_input_res()
+        pred_path = self._find_submission_file()
+        if not pred_path:
+            raise SubmissionException("Static baseline produced no predictions.")
+
+        static_pred_path = os.path.join(self.output_dir, "static_predictions.csv")
+        shutil.copy2(pred_path, static_pred_path)
+        logger.info("Wrote static predictions: %s", static_pred_path)
+
+        ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
+        static_metrics = self._compute_metrics_from_predictions(
+            static_pred_path, ref_path, start_year, end_year
+        )
+        self._write_yearly_auc_csv(
+            os.path.join(self.output_dir, "yearly_aucs_static.csv"),
+            static_metrics["yearly_auc"],
+        )
+        return static_metrics
+
+    def _run_rolling_window(self, ingestion_program_dir, start_year, end_year):
+        logger.info("Running rolling window: %s -> %s", start_year, end_year)
+        full_ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
         combined_pred_path = os.path.join(self.root_dir, "rolling_predictions.csv")
         if os.path.exists(combined_pred_path):
             os.remove(combined_pred_path)
@@ -1584,10 +1882,25 @@ class Run:
         combined_rows = 0
 
         for year in range(start_year, end_year + 1):
-            logger.info(f"Rolling round for year {year}")
-            self._clean_output_dir(keep_dirs={"rolling_scores"})
+            logger.info("Rolling round for year %s", year)
             round_input_dir, round_ref_dir = self._prepare_round_data(year)
             self._log_round_input_tree(round_input_dir, year)
+
+            train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+            test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
+            if train_candidates:
+                logger.info(
+                    "Rolling train rows (%s): %s",
+                    year,
+                    self._count_csv_rows(train_candidates[0]),
+                )
+            if test_candidates:
+                logger.info(
+                    "Rolling test rows (%s): %s",
+                    year,
+                    self._count_csv_rows(test_candidates[0]),
+                )
+
             self.logs = {}
             self.completed_program_counter = 0
             self.watch = True
@@ -1602,115 +1915,128 @@ class Run:
                             input_ref_dir=round_ref_dir,
                         )
                     )
-                    self._sync_predictions_to_input_res()
-
-                    res_dir = os.path.join(self.input_dir, "res")
-                    round_pred_path = os.path.join(res_dir, "predictions.csv")
-                    if not os.path.exists(round_pred_path):
-                        logger.warning(
-                            "No predictions.csv staged for rolling round %s.", year
-                        )
-                    else:
-                        with open(round_pred_path, newline="") as pred_file:
-                            reader = csv.reader(pred_file)
-                            file_header = next(reader, None)
-                            if not file_header:
-                                logger.warning(
-                                    "Predictions file is empty for rolling round %s.",
-                                    year,
-                                )
-                            else:
-                                mode = "w" if combined_header is None else "a"
-                                with open(combined_pred_path, mode, newline="") as out_file:
-                                    writer = csv.writer(out_file)
-                                    if combined_header is None:
-                                        combined_header = file_header
-                                        writer.writerow(combined_header)
-                                    elif file_header != combined_header:
-                                        logger.warning(
-                                            "Skipping predictions with mismatched header: %s",
-                                            round_pred_path,
-                                        )
-                                        file_header = None
-                                    if file_header == combined_header:
-                                        for row in reader:
-                                            writer.writerow(row)
-                                            combined_rows += 1
                 finally:
                     loop.close()
             finally:
                 self._finalize_run_logs()
 
-            scores_path = os.path.join(self.output_dir, "scores.json")
-            if os.path.exists(scores_path):
-                with open(scores_path) as scores_file:
-                    try:
-                        scores = json.load(scores_file)
-                    except json.decoder.JSONDecodeError:
-                        scores = {}
-            else:
-                scores = {}
-            yearly_scores.append({"year": year, "scores": scores})
+            self._sync_predictions_to_input_res()
+            round_pred_path = self._find_submission_file()
+            if not round_pred_path:
+                raise SubmissionException(
+                    f"Rolling round {year} produced no predictions."
+                )
 
-            year_scores_dir = os.path.join(scores_root, str(year))
-            os.makedirs(year_scores_dir, exist_ok=True)
-            if os.path.exists(scores_path):
-                shutil.copy2(scores_path, os.path.join(year_scores_dir, "scores.json"))
-
-            pred_path = self._find_submission_file()
-            ref_path = self._find_first_csv(round_ref_dir)
-            year_auc = math.nan
-            if pred_path and ref_path:
-                try:
-                    y_true, y_score = self._extract_labels_and_predictions(
-                        pred_path, ref_path
+            with open(round_pred_path, newline="") as pred_file:
+                reader = csv.reader(pred_file)
+                file_header = next(reader, None)
+                if not file_header:
+                    raise SubmissionException(
+                        f"Predictions file is empty for rolling round {year}."
                     )
-                    year_auc = self._roc_auc_score(y_true, y_score)
-                    overall_y_true.extend(y_true)
-                    overall_y_score.extend(y_score)
-                except SubmissionException as e:
-                    logger.warning(str(e))
-            if not math.isnan(year_auc):
-                yearly_aucs.append(year_auc)
-            yearly_scores[-1]["year_auc"] = year_auc
+                mode = "w" if combined_header is None else "a"
+                with open(combined_pred_path, mode, newline="") as out_file:
+                    writer = csv.writer(out_file)
+                    if combined_header is None:
+                        combined_header = file_header
+                        writer.writerow(combined_header)
+                    elif file_header != combined_header:
+                        raise SubmissionException(
+                            f"Predictions header mismatch in rolling round {year}."
+                        )
+                    for row in reader:
+                        writer.writerow(row)
+                        combined_rows += 1
 
         if combined_header is None or combined_rows == 0:
-            logger.warning("No combined predictions collected across rolling rounds.")
-        else:
-            os.makedirs(self.output_dir, exist_ok=True)
-            combined_out_path = os.path.join(self.output_dir, "predictions.csv")
-            shutil.copy2(combined_pred_path, combined_out_path)
-            res_dir = os.path.join(self.input_dir, "res")
-            os.makedirs(res_dir, exist_ok=True)
-            shutil.copy2(combined_pred_path, os.path.join(res_dir, "predictions.csv"))
+            raise SubmissionException("No combined predictions collected in rolling.")
 
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(
-                    self._run_program_directory(
+        rolling_pred_path = os.path.join(self.output_dir, "rolling_predictions.csv")
+        shutil.copy2(combined_pred_path, rolling_pred_path)
+        logger.info("Wrote rolling predictions: %s", rolling_pred_path)
+
+        rolling_metrics = self._compute_metrics_from_predictions(
+            rolling_pred_path, full_ref_path, start_year, end_year
+        )
+        self._write_yearly_auc_csv(
+            os.path.join(self.output_dir, "yearly_aucs_rolling.csv"),
+            rolling_metrics["yearly_auc"],
+        )
+        return rolling_metrics
+
+    def _run_static_and_rolling(self, program_dir, ingestion_program_dir):
+        if not os.path.exists(ingestion_program_dir):
+            raise SubmissionException(
+                "Rolling requires an ingestion program during scoring; ingestion_program is missing."
+            )
+        start_year, end_year = self._resolve_rolling_years()
+        logger.info(
+            "Evaluating static + rolling: start_year=%s end_year=%s window=%s",
+            start_year,
+            end_year,
+            self.rolling_window_size,
+        )
+
+        static_results = self._run_static_baseline(
+            ingestion_program_dir, start_year, end_year
+        )
+        rolling_results = self._run_rolling_window(
+            ingestion_program_dir, start_year, end_year
+        )
+
+        # Generate detailed results for rolling predictions
+        res_dir = os.path.join(self.input_dir, "res")
+        os.makedirs(res_dir, exist_ok=True)
+        shutil.copy2(
+            os.path.join(self.output_dir, "rolling_predictions.csv"),
+            os.path.join(res_dir, "predictions.csv"),
+        )
+        self.logs = {}
+        self.completed_program_counter = 0
+        self.watch = True
+        loop = asyncio.new_event_loop()
+        try:
+            async def run_scoring_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await self._run_program_directory(
                         program_dir,
                         kind="program",
                         input_data_dir=None,
-                        input_ref_dir=full_ref_dir,
+                        input_ref_dir=os.path.join(self.root_dir, "input", "ref"),
                     )
-                )
-                loop.run_until_complete(self.watch_detailed_results())
-            finally:
-                loop.close()
-                self._finalize_run_logs()
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
 
-        mean_yearly_auc = (
-            sum(yearly_aucs) / len(yearly_aucs) if yearly_aucs else math.nan
-        )
-        overall_auc = self._roc_auc_score(overall_y_true, overall_y_score)
+            loop.run_until_complete(run_scoring_with_watch())
+        finally:
+            loop.close()
+            self._finalize_run_logs()
 
         final_scores = {
-            "mean_yearly_auc": mean_yearly_auc,
-            "overall_auc": overall_auc,
-            "yearly_scores": yearly_scores,
+            "config": {
+                "rolling_start_year": start_year,
+                "rolling_end_year": end_year,
+                "window_size": self.rolling_window_size,
+            },
+            "static": static_results,
+            "rolling": rolling_results,
+            "mean_yearly_auc": rolling_results.get("mean_yearly_auc"),
+            "overall_auc": rolling_results.get("overall_auc"),
+            "yearly_scores": [
+                {
+                    "year": row.get("year"),
+                    "scores": {},
+                    "year_auc": row.get("auc"),
+                }
+                for row in rolling_results.get("yearly_auc", [])
+            ],
         }
-        with open(os.path.join(self.output_dir, "scores.json"), "w") as scores_file:
-            json.dump(final_scores, scores_file, indent=2)
+        self.combined_scores = final_scores
 
     def _put_dir(self, url, directory):
         """Zip the directory and send it to the given URL using _put_file."""
@@ -1841,10 +2167,13 @@ class Run:
         signal.signal(signal.SIGALRM, alarm_handler)
         signal.alarm(self.execution_time_limit)
         try:
-            if self.rolling_enabled and self.is_scoring:
-                # Rolling execution: build per-year slices, run ingestion + scoring per year,
-                # then aggregate scores after the loop completes.
-                self._run_rolling_rounds(program_dir, ingestion_program_dir)
+            if self.is_scoring:
+                self._run_static_and_rolling(program_dir, ingestion_program_dir)
+                if self.combined_scores is not None:
+                    scores_path = os.path.join(self.output_dir, "scores.json")
+                    with open(scores_path, "w") as scores_file:
+                        json.dump(self.combined_scores, scores_file, indent=2)
+                    logger.info("Wrote combined scores.json: %s", scores_path)
             else:
                 logger.info("Running scoring program, and then ingestion program")
                 self.logs = {}
@@ -1885,7 +2214,7 @@ class Run:
             asyncio.run(self._send_data_through_socket(error_message))
             raise SubmissionException(error_message)
         finally:
-            if not self.rolling_enabled:
+            if not self.is_scoring:
                 self._finalize_run_logs()
         signal.alarm(0)
 

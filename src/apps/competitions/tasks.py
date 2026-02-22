@@ -140,6 +140,8 @@ def _send_to_compute_worker(submission, is_scoring):
 
     submission = Submission.objects.get(id=submission.id)
     task = submission.task
+    # TEMP: force ingestion to run only during scoring to avoid prediction-phase ingestion.
+    ingestion_only_during_scoring = True
 
     # priority of scoring tasks is higher, we don't want to wait around for
     # many submissions to be scored while we're waiting for results
@@ -172,13 +174,13 @@ def _send_to_compute_worker(submission, is_scoring):
 
     if task.ingestion_program:
         if is_scoring or (
-            not task.ingestion_only_during_scoring and not is_scoring
+            not ingestion_only_during_scoring and not is_scoring
         ):
             run_args['ingestion_program'] = make_url_sassy(
                 task.ingestion_program.data_file.name
             )
 
-    if task.input_data and (not is_scoring or task.ingestion_only_during_scoring):
+    if task.input_data and (not is_scoring or ingestion_only_during_scoring):
         run_args['input_data'] = make_url_sassy(task.input_data.data_file.name)
 
     if is_scoring and task.reference_data:
@@ -187,7 +189,7 @@ def _send_to_compute_worker(submission, is_scoring):
     if is_scoring and task.input_data:
         run_args['input_data'] = make_url_sassy(task.input_data.data_file.name)
 
-    run_args['ingestion_only_during_scoring'] = task.ingestion_only_during_scoring
+    run_args['ingestion_only_during_scoring'] = ingestion_only_during_scoring
 
     run_args['program_data'] = make_url_sassy(
         path=submission.data.data_file.name if not is_scoring else task.scoring_program.data_file.name

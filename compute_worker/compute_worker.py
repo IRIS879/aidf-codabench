@@ -241,12 +241,7 @@ def replace_legacy_metadata_command(
     vars_to_replace = [
         ("$input", "/app/input_data" if kind == "ingestion" else "/app/input"),
         ("$output", "/app/output"),
-        (
-            "$program",
-            "/app/ingestion_program"
-            if ingestion_only_during_scoring and is_scoring
-            else "/app/program",
-        ),
+        ("$program", "/app/program"),
         ("$ingestion_program", "/app/program"),
         ("$hidden", "/app/input/ref"),
         ("$shared", "/app/shared"),
@@ -1198,13 +1193,19 @@ class Run:
 
     def _merge_train_with_labels(self, round_input_dir, round_ref_dir):
         train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
-        ref_candidates = glob.glob(os.path.join(round_ref_dir, "*.csv"))
+        master_ref_dir = os.path.join(self.root_dir, "input", "ref")
+        master_ref_candidates = glob.glob(os.path.join(master_ref_dir, "*.csv"))
+        ref_candidates = master_ref_candidates or glob.glob(
+            os.path.join(round_ref_dir, "*.csv")
+        )
         if not train_candidates or not ref_candidates:
             logger.warning("Skipping train/label merge due to missing inputs.")
             return
 
         train_path = self._pick_one_csv(train_candidates, "train")
         ref_path = self._pick_one_csv(ref_candidates, "label")
+        if master_ref_candidates:
+            logger.info("Using full reference labels for train merge: %s", ref_path)
 
         with open(train_path, newline="") as train_file:
             train_reader = csv.DictReader(train_file)
@@ -1234,9 +1235,10 @@ class Run:
                         f"Could not identify label column in {ref_path}"
                     )
 
-                join_cols = [
-                    col for col in train_fields if col in ref_fields and col != label_col
-                ]
+                join_cols = []
+                for col in ("CompNo", "yyyy", "mm"):
+                    if col in train_fields and col in ref_fields:
+                        join_cols.append(col)
                 if not join_cols:
                     raise SubmissionException(
                         f"No join columns found between {train_path} and {ref_path}"
@@ -1574,6 +1576,12 @@ class Run:
 
         scores_root = os.path.join(self.output_dir, "rolling_scores")
         os.makedirs(scores_root, exist_ok=True)
+        full_ref_dir = os.path.join(self.root_dir, "input", "ref")
+        combined_pred_path = os.path.join(self.root_dir, "rolling_predictions.csv")
+        if os.path.exists(combined_pred_path):
+            os.remove(combined_pred_path)
+        combined_header = None
+        combined_rows = 0
 
         for year in range(start_year, end_year + 1):
             logger.info(f"Rolling round for year {year}")
@@ -1584,12 +1592,52 @@ class Run:
             self.completed_program_counter = 0
             self.watch = True
             try:
-                self._run_programs_sequential(
-                    program_dir,
-                    ingestion_program_dir,
-                    input_data_dir=round_input_dir,
-                    input_ref_dir=round_ref_dir,
-                )
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        self._run_program_directory(
+                            ingestion_program_dir,
+                            kind="ingestion",
+                            input_data_dir=round_input_dir,
+                            input_ref_dir=round_ref_dir,
+                        )
+                    )
+                    self._sync_predictions_to_input_res()
+
+                    res_dir = os.path.join(self.input_dir, "res")
+                    round_pred_path = os.path.join(res_dir, "predictions.csv")
+                    if not os.path.exists(round_pred_path):
+                        logger.warning(
+                            "No predictions.csv staged for rolling round %s.", year
+                        )
+                    else:
+                        with open(round_pred_path, newline="") as pred_file:
+                            reader = csv.reader(pred_file)
+                            file_header = next(reader, None)
+                            if not file_header:
+                                logger.warning(
+                                    "Predictions file is empty for rolling round %s.",
+                                    year,
+                                )
+                            else:
+                                mode = "w" if combined_header is None else "a"
+                                with open(combined_pred_path, mode, newline="") as out_file:
+                                    writer = csv.writer(out_file)
+                                    if combined_header is None:
+                                        combined_header = file_header
+                                        writer.writerow(combined_header)
+                                    elif file_header != combined_header:
+                                        logger.warning(
+                                            "Skipping predictions with mismatched header: %s",
+                                            round_pred_path,
+                                        )
+                                        file_header = None
+                                    if file_header == combined_header:
+                                        for row in reader:
+                                            writer.writerow(row)
+                                            combined_rows += 1
+                finally:
+                    loop.close()
             finally:
                 self._finalize_run_logs()
 
@@ -1625,6 +1673,31 @@ class Run:
             if not math.isnan(year_auc):
                 yearly_aucs.append(year_auc)
             yearly_scores[-1]["year_auc"] = year_auc
+
+        if combined_header is None or combined_rows == 0:
+            logger.warning("No combined predictions collected across rolling rounds.")
+        else:
+            os.makedirs(self.output_dir, exist_ok=True)
+            combined_out_path = os.path.join(self.output_dir, "predictions.csv")
+            shutil.copy2(combined_pred_path, combined_out_path)
+            res_dir = os.path.join(self.input_dir, "res")
+            os.makedirs(res_dir, exist_ok=True)
+            shutil.copy2(combined_pred_path, os.path.join(res_dir, "predictions.csv"))
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self._run_program_directory(
+                        program_dir,
+                        kind="program",
+                        input_data_dir=None,
+                        input_ref_dir=full_ref_dir,
+                    )
+                )
+                loop.run_until_complete(self.watch_detailed_results())
+            finally:
+                loop.close()
+                self._finalize_run_logs()
 
         mean_yearly_auc = (
             sum(yearly_aucs) / len(yearly_aucs) if yearly_aucs else math.nan

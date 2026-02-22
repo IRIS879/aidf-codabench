@@ -634,6 +634,7 @@ class Run:
                 # Extract the contents to destination directory
                 with ZipFile(bundle_file, "r") as z:
                     z.extractall(os.path.join(self.root_dir, destination))
+                self._normalize_single_root_dir(os.path.join(self.root_dir, destination))
                 break  # Break if the loop is successful
             except BadZipFile:
                 retries += 1
@@ -644,6 +645,30 @@ class Run:
                     time.sleep(60)  # Wait 60 seconds before retrying
         # Return the zip file path for other uses, e.g. for creating a MD5 hash to identify it
         return bundle_file
+
+    def _normalize_single_root_dir(self, root_dir):
+        if not os.path.isdir(root_dir):
+            return
+        entries = os.listdir(root_dir)
+        if not entries:
+            return
+        child_dirs = [
+            entry
+            for entry in entries
+            if os.path.isdir(os.path.join(root_dir, entry))
+        ]
+        child_files = [
+            entry
+            for entry in entries
+            if os.path.isfile(os.path.join(root_dir, entry))
+        ]
+        if len(child_dirs) != 1 or child_files:
+            return
+        single_dir = os.path.join(root_dir, child_dirs[0])
+        for entry in os.listdir(single_dir):
+            shutil.move(os.path.join(single_dir, entry), os.path.join(root_dir, entry))
+        shutil.rmtree(single_dir)
+        logger.info("Normalized single-root bundle directory: %s", root_dir)
 
     async def _run_container_engine_cmd(self, container, kind):
         """This runs a command and asynchronously writes the data to both a storage file

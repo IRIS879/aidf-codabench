@@ -213,6 +213,7 @@ services:
           memory: 256M
 
   compute_worker:
+    platform: linux/amd64
     command: ["watchmedo auto-restart -p '*.py' --recursive -- celery -A compute_worker worker -l info -Q compute-worker -n compute-worker@%n"]
     working_dir: /app
     build:

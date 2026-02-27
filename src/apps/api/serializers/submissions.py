@@ -1,4 +1,7 @@
 import asyncio
+import io
+import json
+import zipfile
 from os.path import basename
 
 from django.core.cache import cache
@@ -16,6 +19,36 @@ from datasets.models import Data
 from utils.data import make_url_sassy
 
 from tasks.models import Task
+
+def _extract_model_card_from_data(data_obj):
+    """Extract and parse model_card.json from a Data.data_file zip."""
+    if not data_obj or not getattr(data_obj, "data_file", None):
+        raise ValidationError("Submission data file is missing.")
+    # Open from storage
+    f = data_obj.data_file
+    f.open("rb")
+    try:
+        content = f.read()
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise ValidationError("Submission data file must be a .zip archive.")
+    candidates = [n for n in zf.namelist() if n.endswith("model_card.json")]
+    if not candidates:
+        raise ValidationError("Missing model_card.json in submission zip.")
+    raw = zf.read(candidates[0]).decode("utf-8")
+    try:
+        card = json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValidationError("model_card.json is not valid JSON.")
+    return card
+
+
 from queues.models import Queue
 
 
@@ -147,6 +180,21 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
                     raise ValidationError(f'{key}: {value} is not a valid selection from {fact_sheet[key]}')
                 elif not value and fact_sheet[key]['is_required'] == 'true' and not isinstance(value, bool):
                     raise ValidationError(f'{fact_sheet[key]["title"]}({key}) requires an answer')
+
+
+        # --- Model card submission (required) ---
+        if not self.instance:
+            competition = data["phase"].competition
+            if getattr(competition, "enable_model_card_submission", False):
+                if not data.get("data"):
+                    raise ValidationError("This competition requires a submission zip (data).")
+                card = _extract_model_card_from_data(data["data"])
+                model_name = (card.get("model_name") or "").strip()
+                if not model_name:
+                    raise ValidationError("model_card.json must include a non-empty 'model_name'.")
+                # stash for create()
+                self._model_card_payload = card
+                self._model_name_payload = model_name
 
         # Make sure selected tasks are part of the phase
         if attrs.get('tasks'):

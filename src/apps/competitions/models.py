@@ -55,6 +55,21 @@ class Competition(models.Model):
     make_programs_available = models.BooleanField(default=False)
     make_input_data_available = models.BooleanField(default=False)
 
+    # --- Model card submission feature ---
+    # If true, participants must include model_card.json in their submission zip
+    enable_model_card_submission = models.BooleanField(default=False)
+
+    # If true, model cards are downloadable by the public (otherwise host-only)
+    model_card_is_public = models.BooleanField(default=False)
+
+    # JSON template participants can download and fill in
+    model_card_template_json = models.JSONField(blank=True, null=True, default=None)
+
+    # --- Leaderboard display settings ---
+    # If true, leaderboard uses Submission.name as "Model Name" instead of participant/user display name
+    leaderboard_use_model_name = models.BooleanField(default=False)
+
+
     queue = models.ForeignKey('queues.Queue', on_delete=models.SET_NULL, null=True, blank=True,
                               related_name='competitions')
 
@@ -496,6 +511,13 @@ class Submission(models.Model):
     parent = models.ForeignKey('Submission', on_delete=models.CASCADE, blank=True, null=True, related_name='children')
 
     fact_sheet_answers = models.JSONField(null=True, blank=True, max_length=4096)
+
+    # --- Model card stored per submission ---
+    # Parsed from model_card.json inside submission zip (when competition.enable_model_card_submission is True)
+    model_card_json = models.JSONField(blank=True, null=True, default=None)
+    model_card_valid = models.BooleanField(default=False)
+    model_card_schema_version = models.CharField(max_length=50, blank=True, default="v1")
+
 
     # True when submission owner deletes a submission
     is_soft_deleted = models.BooleanField(default=False)

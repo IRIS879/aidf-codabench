@@ -42,6 +42,22 @@ class CompetitionViewSet(ModelViewSet):
     queryset = Competition.objects.all()
     permission_classes = (AllowAny,)
 
+
+    @action(detail=True, methods=['get'], permission_classes=(AllowAny,), url_path='model-card-template')
+    def model_card_template(self, request, pk=None):
+        """Return the JSON template for model_card.json downloads."""
+        competition = self.get_object()
+        template = competition.model_card_template_json
+        if not template:
+            template = {
+                "model_name": "",
+                "model_description": "",
+                "key_assumptions_and_limitations": "",
+                "input_output_specification": "",
+                "training_and_evaluation_details": ""
+            }
+        return Response(template, status=status.HTTP_200_OK)
+
     def get_queryset(self):
 
         qs = super().get_queryset()

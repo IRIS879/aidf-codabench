@@ -223,49 +223,92 @@ class CompetitionViewSet(ModelViewSet):
             return CompetitionCreateSerializer
 
     def create(self, request, *args, **kwargs):
-        """Mostly a copy of the underlying base create, however we return some additional data
-        in the response to remove a GET from the frontend"""
+        """
+        Safe competition create.
+        Normalizes phase tasks and prevents KeyError('task')
+        """
 
-        for phase in request.data['phases']:
-            for index in range(len(phase['tasks'])):
-                phase['tasks'][index] = phase['tasks'][index]['task']
+        data = request.data.copy()
 
-        # TODO - This is Temporary. Need to change Leaderboard to Phase connect to M2M and handle this correctly.
-        # save leaderboard individually, then pass pk to each phase
-        data = request.data
-        if 'leaderboards' in data:
-            leaderboard_data = data['leaderboards'][0]
-            if leaderboard_data['id']:
-                leaderboard_instance = Leaderboard.objects.get(id=leaderboard_data['id'])
-                leaderboard = LeaderboardSerializer(leaderboard_instance, data=data['leaderboards'][0])
+        # ----------------------------
+        # Normalize phase tasks safely
+        # ----------------------------
+        if "phases" in data:
+            for phase in data["phases"]:
+                if "tasks" in phase:
+                    normalized_tasks = []
+
+                    for item in phase["tasks"]:
+
+                        # Case 1: {"task": "..."}
+                        if isinstance(item, dict) and "task" in item:
+                            normalized_tasks.append(item["task"])
+
+                        # Case 2: {"key": "..."}
+                        elif isinstance(item, dict) and "value" in item:
+                            normalized_tasks.append(item["value"])   
+                        elif isinstance(item, dict) and "key" in item:
+                            normalized_tasks.append(item["key"])
+                        elif isinstance(item, dict) and "id" in item:
+                            normalized_tasks.append(item["id"])
+
+                        # Case 4: direct uuid/id already
+                        elif isinstance(item, (str, int)):
+                            normalized_tasks.append(item)
+
+                        else:
+                            raise ValidationError({
+                                "tasks": f"Invalid task format received: {item}"
+                            })
+
+                    phase["tasks"] = normalized_tasks
+
+        # ----------------------------
+        # Handle leaderboard
+        # ----------------------------
+        if "leaderboards" in data:
+            leaderboard_data = data["leaderboards"][0]
+
+            if leaderboard_data.get("id"):
+                leaderboard_instance = Leaderboard.objects.get(id=leaderboard_data["id"])
+                leaderboard = LeaderboardSerializer(leaderboard_instance, data=leaderboard_data)
             else:
-                leaderboard = LeaderboardSerializer(data=data['leaderboards'][0])
-            leaderboard.is_valid()
+                leaderboard = LeaderboardSerializer(data=leaderboard_data)
+
+            leaderboard.is_valid(raise_exception=True)
             leaderboard.save()
-            leaderboard_id = leaderboard["id"].value
+            leaderboard_id = leaderboard.instance.id
 
-            # Set leaderboard id, starting kit and public data for phases
-            for phase in data['phases']:
-                phase['leaderboard'] = leaderboard_id
+            for phase in data["phases"]:
+                phase["leaderboard"] = leaderboard_id
 
                 try:
-                    phase['public_data'] = Data.objects.filter(key=phase['public_data']['value'])[0].id
-                except TypeError:
-                    phase['public_data'] = None
-                try:
-                    phase['starting_kit'] = Data.objects.filter(key=phase['starting_kit']['value'])[0].id
-                except TypeError:
-                    phase['starting_kit'] = None
+                    phase["public_data"] = Data.objects.get(
+                        key=phase["public_data"]["value"]
+                    ).id
+                except Exception:
+                    phase["public_data"] = None
 
-        serializer = self.get_serializer(data=request.data)
+                try:
+                    phase["starting_kit"] = Data.objects.get(
+                        key=phase["starting_kit"]["value"]
+                    ).id
+                except Exception:
+                    phase["starting_kit"] = None
+
+        # ----------------------------
+        # Create competition
+        # ----------------------------
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
+
         headers = self.get_success_headers(serializer.data)
 
-        # Re-do serializer in detail version (i.e. for Collaborator data)
         context = self.get_serializer_context()
-        serializer = CompetitionDetailSerializer(serializer.instance, context=context)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        detail_serializer = CompetitionDetailSerializer(serializer.instance, context=context)
+
+        return Response(detail_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
         # Execute everything inside atomic transaction

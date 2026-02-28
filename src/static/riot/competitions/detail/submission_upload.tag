@@ -2,7 +2,22 @@
     <div class="ui sixteen wide column submission-container">
 
         <div class="submission-form">
-            <h1>Submission upload</h1>
+        <div class="ui grid middle aligned">
+            <div class="twelve wide column">
+                <h1 style="margin: 0;">Submission upload</h1>
+            </div>
+
+            <div class="four wide column right aligned">
+                <a
+                class="ui small button"
+                href="/static/model_cards/model_card_template.json"
+                target="_blank"
+                rel="noopener"
+                >
+                Download Model Card Template
+                </a>
+            </div>
+        </div>
             <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">This phase has ended and no longer accepts submissions!</div>
             <div if="{_.get(selected_phase, 'status') === 'Next'}" class="ui yellow message">This phase hasn't started yet!</div>
             <form class="ui form coda-animated {error: errors}" ref="form" enctype="multipart/form-data">

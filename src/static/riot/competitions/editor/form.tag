@@ -258,6 +258,9 @@
                             'title',
                             'logo',
                             'training_mode',
+                            'period_col',
+                            'rolling_start_period',
+                            'rolling_end_period',
                             'rolling_window_size',
                             'rolling_window_start_date',
                             'rolling_window_end_date'

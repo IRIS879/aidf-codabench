@@ -88,11 +88,17 @@ class CompetitionTests(APITestCase):
         url = reverse('competition-detail', kwargs={"pk": self.comp.pk})
         data = self._prepare_competition_data(url)
         data["training_mode"] = "rolling"
+        data["period_col"] = None
+        data["rolling_start_period"] = None
+        data["rolling_end_period"] = None
         data["rolling_window_size"] = None
         data["rolling_window_start_date"] = None
         data["rolling_window_end_date"] = None
         resp = self.client.put(url, data=json.dumps(data), content_type="application/json")
         assert resp.status_code == 400
+        assert "period_col" in resp.data
+        assert "rolling_start_period" in resp.data
+        assert "rolling_end_period" in resp.data
         assert "rolling_window_size" in resp.data
 
     def test_static_mode_ignores_rolling_fields(self):
@@ -100,6 +106,9 @@ class CompetitionTests(APITestCase):
         url = reverse('competition-detail', kwargs={"pk": self.comp.pk})
         data = self._prepare_competition_data(url)
         data["training_mode"] = "static"
+        data["period_col"] = "yyyy"
+        data["rolling_start_period"] = "2018"
+        data["rolling_end_period"] = "2019"
         data["rolling_window_size"] = 5
         data["rolling_window_start_date"] = "2018-01-01"
         data["rolling_window_end_date"] = "2019-01-01"
@@ -107,6 +116,9 @@ class CompetitionTests(APITestCase):
         assert resp.status_code == 200
         self.comp.refresh_from_db()
         assert self.comp.training_mode == "static"
+        assert self.comp.period_col is None
+        assert self.comp.rolling_start_period is None
+        assert self.comp.rolling_end_period is None
         assert self.comp.rolling_window_size is None
         assert self.comp.rolling_window_start_date is None
         assert self.comp.rolling_window_end_date is None

@@ -53,6 +53,9 @@ COMPETITION_FIELDS = [
     "fact_sheet",
     "forum_enabled",
     "training_mode",
+    "period_col",
+    "rolling_start_period",
+    "rolling_end_period",
     "rolling_window_size",
     "rolling_window_start_date",
     "rolling_window_end_date",
@@ -145,7 +148,26 @@ def _send_to_compute_worker(submission, is_scoring):
         "training_mode": training_mode,
     }
     if training_mode == Competition.TRAINING_MODE_ROLLING:
+        run_args["period_col"] = competition.period_col
         run_args["rolling_window_size"] = competition.rolling_window_size
+        run_args["rolling_start_period"] = (
+            competition.rolling_start_period
+            if competition.rolling_start_period
+            else (
+                competition.rolling_window_start_date.isoformat()
+                if competition.rolling_window_start_date
+                else None
+            )
+        )
+        run_args["rolling_end_period"] = (
+            competition.rolling_end_period
+            if competition.rolling_end_period
+            else (
+                competition.rolling_window_end_date.isoformat()
+                if competition.rolling_window_end_date
+                else None
+            )
+        )
         run_args["rolling_start_year"] = (
             competition.rolling_window_start_date.year if competition.rolling_window_start_date else None
         )

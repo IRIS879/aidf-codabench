@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import datetime as dt
 import glob
 import hashlib
 import json
@@ -39,6 +40,10 @@ import logging
 logger = logging.getLogger(__name__)
 from logs_loguru import configure_logging, colorize_run_args
 import json
+try:
+    import pandas as pd
+except Exception:
+    pd = None
 
 
 # -----------------------------------------------
@@ -386,7 +391,12 @@ class Run:
         self.rolling_window_size = int(
             run_args.get("window_size", run_args.get("rolling_window_size", 2))
         )
-        self.rolling_year_col = run_args.get("year_col", "yyyy")
+        self.rolling_period_col = run_args.get("period_col", run_args.get("year_col", "yyyy")) or "yyyy"
+        self.rolling_start_period = run_args.get("rolling_start_period")
+        self.rolling_end_period = run_args.get("rolling_end_period")
+        self.period_sort_strategy = None
+        self.period_key_to_label = {}
+        self.period_keys_ordered = []
 
         # During prediction program will be the submission program, during scoring it will be the
         # scoring program
@@ -1118,7 +1128,141 @@ class Run:
                 rel_path = os.path.relpath(full_path, root_dir)
                 yield full_path, rel_path
 
-    def _slice_csv_by_year(self, src_path, dst_path, year_col, predicate):
+    def _available_columns_str(self, header, max_cols=20):
+        if not header:
+            return "[]"
+        cols = header[:max_cols]
+        suffix = " ..." if len(header) > max_cols else ""
+        return "[" + ", ".join(cols) + "]" + suffix
+
+    def _to_period_key(self, value, strategy):
+        text = str(value).strip() if value is not None else ""
+        if not text:
+            return None
+
+        if strategy == "numeric":
+            try:
+                return float(text)
+            except (TypeError, ValueError):
+                return None
+
+        if strategy == "datetime":
+            if pd is not None:
+                parsed = pd.to_datetime([text], errors="coerce")
+                if not parsed.isna().all():
+                    return parsed.iloc[0].to_pydatetime()
+                return None
+            try:
+                return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+        return text
+
+    def _detect_period_strategy(self, period_values):
+        if not period_values:
+            return "lexicographic"
+
+        numeric_ok = True
+        for value in period_values:
+            try:
+                float(str(value).strip())
+            except (TypeError, ValueError):
+                numeric_ok = False
+                break
+        if numeric_ok:
+            return "numeric"
+
+        if pd is not None:
+            parsed = pd.to_datetime(period_values, errors="coerce")
+            if not parsed.isna().any():
+                return "datetime"
+        else:
+            parsed_ok = True
+            for value in period_values:
+                try:
+                    dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+                except ValueError:
+                    parsed_ok = False
+                    break
+            if parsed_ok:
+                return "datetime"
+
+        return "lexicographic"
+
+    def _normalize_boundary_key(self, boundary_value, strategy):
+        if boundary_value is None:
+            return None
+        key = self._to_period_key(boundary_value, strategy)
+        if key is not None:
+            return key
+        if strategy == "numeric" and isinstance(boundary_value, str):
+            if pd is not None:
+                parsed = pd.to_datetime([boundary_value], errors="coerce")
+                if not parsed.isna().all():
+                    return float(parsed.iloc[0].year)
+        return None
+
+    def _get_period_col_index(self, header, src_path):
+        if self.rolling_period_col not in header:
+            raise SubmissionException(
+                f"Period column '{self.rolling_period_col}' not found in {src_path}. "
+                f"Available columns: {self._available_columns_str(header)}"
+            )
+        return header.index(self.rolling_period_col)
+
+    def _build_period_catalog(self):
+        master_csv = self._find_first_csv(os.path.join(self.root_dir, "input_data"))
+        if not master_csv:
+            raise SubmissionException("Rolling enabled but no input data found.")
+
+        with open(master_csv, newline="") as src_file:
+            reader = csv.reader(src_file)
+            header = next(reader, None)
+            if not header:
+                raise SubmissionException(f"Input data CSV is empty: {master_csv}")
+            period_idx = self._get_period_col_index(header, master_csv)
+            raw_values = []
+            for row in reader:
+                if len(row) <= period_idx:
+                    continue
+                raw_val = row[period_idx]
+                if raw_val is None or str(raw_val).strip() == "":
+                    continue
+                raw_values.append(str(raw_val).strip())
+
+        if not raw_values:
+            raise SubmissionException(
+                f"Could not infer rolling periods from column '{self.rolling_period_col}' in {master_csv}."
+            )
+
+        strategy = self._detect_period_strategy(raw_values)
+        logger.info(
+            "Rolling period strategy for column '%s': %s",
+            self.rolling_period_col,
+            strategy,
+        )
+
+        key_to_label = {}
+        for raw_val in raw_values:
+            key = self._to_period_key(raw_val, strategy)
+            if key is None:
+                continue
+            if key not in key_to_label:
+                key_to_label[key] = raw_val
+
+        if not key_to_label:
+            raise SubmissionException(
+                f"Could not parse period values from column '{self.rolling_period_col}' in {master_csv}."
+            )
+
+        ordered_keys = sorted(key_to_label.keys())
+        self.period_sort_strategy = strategy
+        self.period_key_to_label = key_to_label
+        self.period_keys_ordered = ordered_keys
+        return ordered_keys
+
+    def _slice_csv_by_period(self, src_path, dst_path, predicate):
         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
         with open(src_path, newline="") as src_file, open(
             dst_path, "w", newline=""
@@ -1128,27 +1272,27 @@ class Run:
             header = next(reader, None)
             if not header:
                 return
-            if year_col not in header:
-                raise SubmissionException(
-                    f"Year column '{year_col}' not found in {src_path}"
-                )
-            year_idx = header.index(year_col)
+            period_idx = self._get_period_col_index(header, src_path)
             writer.writerow(header)
             for row in reader:
-                if len(row) <= year_idx:
+                if len(row) <= period_idx:
                     continue
-                try:
-                    year_val = int(float(row[year_idx]))
-                except (ValueError, TypeError):
+                period_val = self._to_period_key(row[period_idx], self.period_sort_strategy)
+                if period_val is None:
                     continue
-                if predicate(year_val):
+                if predicate(period_val):
                     writer.writerow(row)
 
-    def _slice_input_data(self, round_input_dir, year):
+    def _slice_input_data(self, round_input_dir, period_key):
         master_dir = os.path.join(self.root_dir, "input_data")
         files = list(self._list_files(master_dir))
-        start_year = year - self.rolling_window_size
-        end_year = year - 1
+        period_index = self.period_keys_ordered.index(period_key)
+        train_keys = set(
+            self.period_keys_ordered[
+                max(0, period_index - self.rolling_window_size):period_index
+            ]
+        )
+        test_keys = {period_key}
         has_split_markers = any(
             "train" in os.path.basename(path).lower()
             or "test" in os.path.basename(path).lower()
@@ -1169,18 +1313,16 @@ class Run:
             if has_split_markers:
                 dst_path = os.path.join(round_input_dir, rel_path)
                 if "train" in lower_name:
-                    self._slice_csv_by_year(
+                    self._slice_csv_by_period(
                         src_path,
                         dst_path,
-                        self.rolling_year_col,
-                        lambda y: start_year <= y <= end_year,
+                        lambda p: p in train_keys,
                     )
                 elif "test" in lower_name:
-                    self._slice_csv_by_year(
+                    self._slice_csv_by_period(
                         src_path,
                         dst_path,
-                        self.rolling_year_col,
-                        lambda y: y == year,
+                        lambda p: p in test_keys,
                     )
                 else:
                     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -1193,14 +1335,13 @@ class Run:
             test_name = f"test_{base_name}"
             train_path = os.path.join(round_input_dir, base_dir, train_name)
             test_path = os.path.join(round_input_dir, base_dir, test_name)
-            self._slice_csv_by_year(
+            self._slice_csv_by_period(
                 src_path,
                 train_path,
-                self.rolling_year_col,
-                lambda y: start_year <= y <= end_year,
+                lambda p: p in train_keys,
             )
-            self._slice_csv_by_year(
-                src_path, test_path, self.rolling_year_col, lambda y: y == year
+            self._slice_csv_by_period(
+                src_path, test_path, lambda p: p in test_keys
             )
 
     def _slice_input_data_by_predicates(
@@ -1228,17 +1369,15 @@ class Run:
             if has_split_markers:
                 dst_path = os.path.join(round_input_dir, rel_path)
                 if "train" in lower_name:
-                    self._slice_csv_by_year(
+                    self._slice_csv_by_period(
                         src_path,
                         dst_path,
-                        self.rolling_year_col,
                         train_predicate,
                     )
                 elif "test" in lower_name:
-                    self._slice_csv_by_year(
+                    self._slice_csv_by_period(
                         src_path,
                         dst_path,
-                        self.rolling_year_col,
                         test_predicate,
                     )
                 else:
@@ -1252,14 +1391,14 @@ class Run:
             test_name = f"test_{base_name}"
             train_path = os.path.join(round_input_dir, base_dir, train_name)
             test_path = os.path.join(round_input_dir, base_dir, test_name)
-            self._slice_csv_by_year(
-                src_path, train_path, self.rolling_year_col, train_predicate
+            self._slice_csv_by_period(
+                src_path, train_path, train_predicate
             )
-            self._slice_csv_by_year(
-                src_path, test_path, self.rolling_year_col, test_predicate
+            self._slice_csv_by_period(
+                src_path, test_path, test_predicate
             )
 
-    def _slice_reference_data(self, round_ref_dir, year):
+    def _slice_reference_data(self, round_ref_dir, period_key):
         master_dir = os.path.join(self.root_dir, "input", "ref")
         for src_path, rel_path in self._list_files(master_dir):
             if not src_path.lower().endswith(".csv"):
@@ -1269,32 +1408,37 @@ class Run:
                 continue
 
             dst_path = os.path.join(round_ref_dir, rel_path)
-            self._slice_csv_by_year(
-                src_path, dst_path, self.rolling_year_col, lambda y: y == year
+            self._slice_csv_by_period(
+                src_path, dst_path, lambda p: p == period_key
             )
 
-    def _prepare_round_data(self, year):
+    def _prepare_round_data(self, period_key):
         round_input_dir = os.path.join(self.root_dir, "input_data_round")
         round_ref_dir = os.path.join(self.root_dir, "input_ref_round")
         self._ensure_clean_dir(round_input_dir)
         self._ensure_clean_dir(round_ref_dir)
-        self._slice_input_data(round_input_dir, year)
-        self._slice_reference_data(round_ref_dir, year)
+        self._slice_input_data(round_input_dir, period_key)
+        self._slice_reference_data(round_ref_dir, period_key)
         self._merge_train_with_labels(round_input_dir, round_ref_dir)
         return round_input_dir, round_ref_dir
 
-    def _prepare_static_data(self, start_year, end_year):
+    def _prepare_static_data(self, evaluation_period_keys):
         round_input_dir = os.path.join(self.root_dir, "input_data_static")
         round_ref_dir = os.path.join(self.root_dir, "input_ref_static")
         self._ensure_clean_dir(round_input_dir)
         self._ensure_clean_dir(round_ref_dir)
 
-        train_start = start_year - self.rolling_window_size
-        train_end = start_year - 1
+        first_eval_index = self.period_keys_ordered.index(evaluation_period_keys[0])
+        train_keys = set(
+            self.period_keys_ordered[
+                max(0, first_eval_index - self.rolling_window_size):first_eval_index
+            ]
+        )
+        eval_keys = set(evaluation_period_keys)
         self._slice_input_data_by_predicates(
             round_input_dir,
-            lambda y: train_start <= y <= train_end,
-            lambda y: start_year <= y <= end_year,
+            lambda p: p in train_keys,
+            lambda p: p in eval_keys,
         )
         self._merge_train_with_labels(round_input_dir, round_ref_dir)
         return round_input_dir, round_ref_dir
@@ -1363,7 +1507,7 @@ class Run:
                     )
 
                 join_cols = []
-                for col in ("CompNo", "yyyy", "mm"):
+                for col in ("CompNo", self.rolling_period_col, "yyyy", "mm"):
                     if col in train_fields and col in ref_fields:
                         join_cols.append(col)
                 if not join_cols:
@@ -1457,8 +1601,8 @@ class Run:
             pred_col = self._select_column(pred_only, ["pred", "score", "prob"])
         label_col = self._select_column(ref_only, ["label", "target", "y_"])
 
-        if not join_cols and self.rolling_year_col in pred_cols:
-            join_cols = [self.rolling_year_col]
+        if not join_cols and self.rolling_period_col in pred_cols:
+            join_cols = [self.rolling_period_col]
 
         if not pred_col or not label_col or not join_cols:
             raise SubmissionException(
@@ -1519,7 +1663,7 @@ class Run:
         return u / (n_pos * n_neg)
 
     def _infer_join_cols(self, pred_cols, ref_cols):
-        preferred = ["CompNo", "yyyy", "mm"]
+        preferred = ["CompNo", self.rolling_period_col, "yyyy", "mm"]
         if all(col in pred_cols and col in ref_cols for col in preferred):
             return preferred
         join_cols = [col for col in pred_cols if col in ref_cols]
@@ -1543,7 +1687,7 @@ class Run:
                 return name
         return None
 
-    def _compute_metrics_from_predictions(self, pred_path, ref_path, start_year, end_year):
+    def _compute_metrics_from_predictions(self, pred_path, ref_path, evaluation_period_keys):
         pred_cols = self._load_csv_header(pred_path)
         ref_cols = self._load_csv_header(ref_path)
 
@@ -1567,19 +1711,22 @@ class Run:
             )
 
         ref_map = {}
+        eval_period_set = set(evaluation_period_keys)
+        period_idx = self._get_period_col_index(ref_cols, ref_path)
         with open(ref_path, newline="") as ref_file:
             reader = csv.DictReader(ref_file)
             for row in reader:
                 key = tuple(row.get(col) for col in join_cols)
-                try:
-                    year_val = int(float(row.get(self.rolling_year_col)))
-                except (TypeError, ValueError):
+                if len(ref_cols) <= period_idx:
                     continue
-                if year_val < start_year or year_val > end_year:
+                period_key = self._to_period_key(
+                    row.get(self.rolling_period_col), self.period_sort_strategy
+                )
+                if period_key is None or period_key not in eval_period_set:
                     continue
-                ref_map[key] = (row.get(label_col), year_val)
+                ref_map[key] = (row.get(label_col), period_key)
 
-        yearly = {year: {"y_true": [], "y_score": []} for year in range(start_year, end_year + 1)}
+        yearly = {period_key: {"y_true": [], "y_score": []} for period_key in evaluation_period_keys}
         overall_y_true = []
         overall_y_score = []
 
@@ -1589,30 +1736,32 @@ class Run:
                 key = tuple(row.get(col) for col in join_cols)
                 if key not in ref_map:
                     continue
-                label_raw, year_val = ref_map[key]
+                label_raw, period_key = ref_map[key]
                 try:
                     label_val = int(float(label_raw))
                     score_val = float(row.get(pred_col))
                 except (TypeError, ValueError):
                     continue
                 y_true = 1 if label_val == 1 else 0
-                yearly[year_val]["y_true"].append(y_true)
-                yearly[year_val]["y_score"].append(score_val)
+                yearly[period_key]["y_true"].append(y_true)
+                yearly[period_key]["y_score"].append(score_val)
                 overall_y_true.append(y_true)
                 overall_y_score.append(score_val)
 
         yearly_auc = []
         valid_aucs = []
-        for year in range(start_year, end_year + 1):
-            y_true = yearly[year]["y_true"]
-            y_score = yearly[year]["y_score"]
+        for period_key in evaluation_period_keys:
+            period_label = self.period_key_to_label.get(period_key, str(period_key))
+            y_true = yearly[period_key]["y_true"]
+            y_score = yearly[period_key]["y_score"]
             n_total = len(y_true)
             n_pos = sum(1 for y in y_true if y == 1)
             n_neg = n_total - n_pos
             if n_total == 0:
                 yearly_auc.append(
                     {
-                        "year": year,
+                        "period": period_label,
+                        "year": period_label,
                         "auc": None,
                         "n_total": 0,
                         "n_pos": 0,
@@ -1623,7 +1772,8 @@ class Run:
             if n_pos == 0 or n_neg == 0:
                 yearly_auc.append(
                     {
-                        "year": year,
+                        "period": period_label,
+                        "year": period_label,
                         "auc": None,
                         "n_total": n_total,
                         "n_pos": n_pos,
@@ -1633,7 +1783,13 @@ class Run:
                 continue
             auc = self._roc_auc_score(y_true, y_score)
             yearly_auc.append(
-                {"year": year, "auc": auc, "n_total": n_total, "n_pos": n_pos}
+                {
+                    "period": period_label,
+                    "year": period_label,
+                    "auc": auc,
+                    "n_total": n_total,
+                    "n_pos": n_pos,
+                }
             )
             if not math.isnan(auc):
                 valid_aucs.append(auc)
@@ -1651,11 +1807,11 @@ class Run:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", newline="") as out_file:
             writer = csv.writer(out_file)
-            writer.writerow(["year", "auc", "n_total", "n_pos", "reason"])
+            writer.writerow(["period", "auc", "n_total", "n_pos", "reason"])
             for row in yearly_auc:
                 writer.writerow(
                     [
-                        row.get("year"),
+                        row.get("period", row.get("year")),
                         row.get("auc"),
                         row.get("n_total"),
                         row.get("n_pos"),
@@ -1782,90 +1938,62 @@ class Run:
 
             logger.info("Program finished")
 
-    def _resolve_rolling_years(self):
-        if self.rolling_start_year is not None and self.rolling_end_year is not None:
-            start_year = int(self.rolling_start_year)
-            end_year = int(self.rolling_end_year)
-            # Ensure we have at least W years of history for the first test year.
-            min_allowed_start = None
-            master_csv = self._find_first_csv(
-                os.path.join(self.root_dir, "input_data")
-            )
-            if master_csv:
-                with open(master_csv, newline="") as src_file:
-                    reader = csv.reader(src_file)
-                    header = next(reader, None)
-                    if header and self.rolling_year_col in header:
-                        year_idx = header.index(self.rolling_year_col)
-                        for row in reader:
-                            if len(row) <= year_idx:
-                                continue
-                            try:
-                                year_val = int(float(row[year_idx]))
-                            except (ValueError, TypeError):
-                                continue
-                            min_allowed_start = (
-                                year_val
-                                if min_allowed_start is None
-                                else min(min_allowed_start, year_val)
-                            )
-            if min_allowed_start is not None:
-                min_allowed_start += self.rolling_window_size
-                if start_year < min_allowed_start:
-                    start_year = min_allowed_start
-            if start_year > end_year:
-                raise SubmissionException(
-                    "Rolling window start year exceeds end year after adjustment."
-                )
-            return start_year, end_year
-
-        logger.warning(
-            "Rolling enabled without explicit start/end years; inferring from input data."
-        )
-        master_csv = self._find_first_csv(os.path.join(self.root_dir, "input_data"))
-        if not master_csv:
-            raise SubmissionException("Rolling enabled but no input data found.")
-
-        min_year = None
-        max_year = None
-        with open(master_csv, newline="") as src_file:
-            reader = csv.reader(src_file)
-            header = next(reader, None)
-            if not header or self.rolling_year_col not in header:
-                raise SubmissionException(
-                    f"Year column '{self.rolling_year_col}' not found in {master_csv}"
-                )
-            year_idx = header.index(self.rolling_year_col)
-            for row in reader:
-                if len(row) <= year_idx:
-                    continue
-                try:
-                    year_val = int(float(row[year_idx]))
-                except (ValueError, TypeError):
-                    continue
-                min_year = year_val if min_year is None else min(min_year, year_val)
-                max_year = year_val if max_year is None else max(max_year, year_val)
-
-        if min_year is None or max_year is None:
-            raise SubmissionException("Could not infer rolling year range from input.")
-        # Ensure we have at least W years of history for the first test year.
-        start_year = min_year + self.rolling_window_size
-        if start_year > max_year:
+    def _resolve_rolling_periods(self):
+        period_keys = self._build_period_catalog()
+        if len(period_keys) <= self.rolling_window_size:
             raise SubmissionException(
                 "Rolling window size exceeds available history for evaluation."
             )
-        return start_year, max_year
 
-    def _run_static_baseline(self, ingestion_program_dir, start_year, end_year):
+        start_key = self._normalize_boundary_key(self.rolling_start_period, self.period_sort_strategy)
+        end_key = self._normalize_boundary_key(self.rolling_end_period, self.period_sort_strategy)
+
+        if start_key is None and self.rolling_start_year is not None:
+            start_key = self._normalize_boundary_key(self.rolling_start_year, self.period_sort_strategy)
+        if end_key is None and self.rolling_end_year is not None:
+            end_key = self._normalize_boundary_key(self.rolling_end_year, self.period_sort_strategy)
+
+        if start_key is not None and end_key is not None and start_key > end_key:
+            raise SubmissionException("Rolling start period is greater than end period.")
+
+        valid_indices = []
+        for idx, key in enumerate(period_keys):
+            if start_key is not None and key < start_key:
+                continue
+            if end_key is not None and key > end_key:
+                continue
+            valid_indices.append(idx)
+
+        if not valid_indices:
+            raise SubmissionException(
+                "No rolling periods match the configured rolling start/end bounds."
+            )
+
+        start_idx = max(valid_indices[0], self.rolling_window_size)
+        end_idx = valid_indices[-1]
+        if start_idx > end_idx:
+            raise SubmissionException(
+                "Rolling start period exceeds end period after window-size adjustment."
+            )
+
+        evaluation_keys = period_keys[start_idx:end_idx + 1]
         logger.info(
-            "Running static baseline: train years %s-%s, test years %s-%s",
-            start_year - self.rolling_window_size,
-            start_year - 1,
-            start_year,
-            end_year,
+            "Resolved rolling periods (%s): %s",
+            len(evaluation_keys),
+            [self.period_key_to_label.get(k, str(k)) for k in evaluation_keys],
         )
-        round_input_dir, round_ref_dir = self._prepare_static_data(start_year, end_year)
-        self._log_round_input_tree(round_input_dir, start_year)
+        return evaluation_keys
+
+    def _run_static_baseline(self, ingestion_program_dir, evaluation_period_keys):
+        first_eval = self.period_key_to_label.get(evaluation_period_keys[0], str(evaluation_period_keys[0]))
+        last_eval = self.period_key_to_label.get(evaluation_period_keys[-1], str(evaluation_period_keys[-1]))
+        logger.info(
+            "Running static baseline: test periods %s -> %s",
+            first_eval,
+            last_eval,
+        )
+        round_input_dir, round_ref_dir = self._prepare_static_data(evaluation_period_keys)
+        self._log_round_input_tree(round_input_dir, first_eval)
 
         train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
         test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
@@ -1908,7 +2036,7 @@ class Run:
 
         ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
         static_metrics = self._compute_metrics_from_predictions(
-            static_pred_path, ref_path, start_year, end_year
+            static_pred_path, ref_path, evaluation_period_keys
         )
         self._write_yearly_auc_csv(
             os.path.join(self.output_dir, "yearly_aucs_static.csv"),
@@ -1916,8 +2044,11 @@ class Run:
         )
         return static_metrics
 
-    def _run_rolling_window(self, ingestion_program_dir, start_year, end_year):
-        logger.info("Running rolling window: %s -> %s", start_year, end_year)
+    def _run_rolling_window(self, ingestion_program_dir, evaluation_period_keys):
+        logger.info(
+            "Running rolling window for periods: %s",
+            [self.period_key_to_label.get(k, str(k)) for k in evaluation_period_keys],
+        )
         full_ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
         combined_pred_path = os.path.join(self.root_dir, "rolling_predictions.csv")
         if os.path.exists(combined_pred_path):
@@ -1925,23 +2056,24 @@ class Run:
         combined_header = None
         combined_rows = 0
 
-        for year in range(start_year, end_year + 1):
-            logger.info("Rolling round for year %s", year)
-            round_input_dir, round_ref_dir = self._prepare_round_data(year)
-            self._log_round_input_tree(round_input_dir, year)
+        for period_key in evaluation_period_keys:
+            period_label = self.period_key_to_label.get(period_key, str(period_key))
+            logger.info("Rolling round for period %s", period_label)
+            round_input_dir, round_ref_dir = self._prepare_round_data(period_key)
+            self._log_round_input_tree(round_input_dir, period_label)
 
             train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
             test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
             if train_candidates:
                 logger.info(
                     "Rolling train rows (%s): %s",
-                    year,
+                    period_label,
                     self._count_csv_rows(train_candidates[0]),
                 )
             if test_candidates:
                 logger.info(
                     "Rolling test rows (%s): %s",
-                    year,
+                    period_label,
                     self._count_csv_rows(test_candidates[0]),
                 )
 
@@ -1968,7 +2100,7 @@ class Run:
             round_pred_path = self._find_submission_file()
             if not round_pred_path:
                 raise SubmissionException(
-                    f"Rolling round {year} produced no predictions."
+                    f"Rolling round {period_label} produced no predictions."
                 )
 
             with open(round_pred_path, newline="") as pred_file:
@@ -1976,7 +2108,7 @@ class Run:
                 file_header = next(reader, None)
                 if not file_header:
                     raise SubmissionException(
-                        f"Predictions file is empty for rolling round {year}."
+                        f"Predictions file is empty for rolling round {period_label}."
                     )
                 mode = "w" if combined_header is None else "a"
                 with open(combined_pred_path, mode, newline="") as out_file:
@@ -1986,7 +2118,7 @@ class Run:
                         writer.writerow(combined_header)
                     elif file_header != combined_header:
                         raise SubmissionException(
-                            f"Predictions header mismatch in rolling round {year}."
+                            f"Predictions header mismatch in rolling round {period_label}."
                         )
                     for row in reader:
                         writer.writerow(row)
@@ -2000,7 +2132,7 @@ class Run:
         logger.info("Wrote rolling predictions: %s", rolling_pred_path)
 
         rolling_metrics = self._compute_metrics_from_predictions(
-            rolling_pred_path, full_ref_path, start_year, end_year
+            rolling_pred_path, full_ref_path, evaluation_period_keys
         )
         self._write_yearly_auc_csv(
             os.path.join(self.output_dir, "yearly_aucs_rolling.csv"),
@@ -2013,19 +2145,22 @@ class Run:
             raise SubmissionException(
                 "Rolling requires an ingestion program during scoring; ingestion_program is missing."
             )
-        start_year, end_year = self._resolve_rolling_years()
+        evaluation_period_keys = self._resolve_rolling_periods()
+        first_eval = self.period_key_to_label.get(evaluation_period_keys[0], str(evaluation_period_keys[0]))
+        last_eval = self.period_key_to_label.get(evaluation_period_keys[-1], str(evaluation_period_keys[-1]))
         logger.info(
-            "Evaluating static + rolling: start_year=%s end_year=%s window=%s",
-            start_year,
-            end_year,
+            "Evaluating static + rolling: start_period=%s end_period=%s window=%s period_col=%s",
+            first_eval,
+            last_eval,
             self.rolling_window_size,
+            self.rolling_period_col,
         )
 
         static_results = self._run_static_baseline(
-            ingestion_program_dir, start_year, end_year
+            ingestion_program_dir, evaluation_period_keys
         )
         rolling_results = self._run_rolling_window(
-            ingestion_program_dir, start_year, end_year
+            ingestion_program_dir, evaluation_period_keys
         )
 
         # Generate detailed results for rolling predictions
@@ -2063,8 +2198,9 @@ class Run:
 
         final_scores = {
             "config": {
-                "rolling_start_year": start_year,
-                "rolling_end_year": end_year,
+                "rolling_start_period": first_eval,
+                "rolling_end_period": last_eval,
+                "period_col": self.rolling_period_col,
                 "window_size": self.rolling_window_size,
             },
             "static": static_results,
@@ -2073,7 +2209,7 @@ class Run:
             "overall_auc": rolling_results.get("overall_auc"),
             "yearly_scores": [
                 {
-                    "year": row.get("year"),
+                    "year": row.get("period", row.get("year")),
                     "scores": {},
                     "year_auc": row.get("auc"),
                 }
@@ -2330,6 +2466,10 @@ class Run:
             prog_status["rollingWindowSize"] = self.rolling_window_size
             prog_status["rollingStartYear"] = self.rolling_start_year
             prog_status["rollingEndYear"] = self.rolling_end_year
+            prog_status["rollingStartPeriod"] = self.rolling_start_period
+            prog_status["rollingEndPeriod"] = self.rolling_end_period
+            prog_status["periodCol"] = self.rolling_period_col
+            prog_status["periodSortStrategy"] = self.period_sort_strategy
 
         logger.info(f"Metadata output: {prog_status}")
 

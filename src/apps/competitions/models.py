@@ -98,6 +98,9 @@ class Competition(models.Model):
         choices=TRAINING_MODE_CHOICES,
         default=TRAINING_MODE_STATIC,
     )
+    period_col = models.CharField(max_length=128, null=True, blank=True)
+    rolling_start_period = models.CharField(max_length=128, null=True, blank=True)
+    rolling_end_period = models.CharField(max_length=128, null=True, blank=True)
     rolling_window_size = models.PositiveIntegerField(null=True, blank=True)
     rolling_window_start_date = models.DateField(null=True, blank=True)
     rolling_window_end_date = models.DateField(null=True, blank=True)
@@ -108,26 +111,25 @@ class Competition(models.Model):
     def clean(self):
         if self.training_mode == self.TRAINING_MODE_ROLLING:
             missing_fields = []
+            if not self.period_col:
+                # Backward compatibility for pre-period_col rolling competitions.
+                self.period_col = "yyyy"
+            if not self.rolling_start_period and self.rolling_window_start_date:
+                self.rolling_start_period = self.rolling_window_start_date.isoformat()
+            if not self.rolling_end_period and self.rolling_window_end_date:
+                self.rolling_end_period = self.rolling_window_end_date.isoformat()
+            if not self.rolling_start_period:
+                missing_fields.append("rolling_start_period")
+            if not self.rolling_end_period:
+                missing_fields.append("rolling_end_period")
             if self.rolling_window_size is None:
                 missing_fields.append("rolling_window_size")
-            if self.rolling_window_start_date is None:
-                missing_fields.append("rolling_window_start_date")
-            if self.rolling_window_end_date is None:
-                missing_fields.append("rolling_window_end_date")
             if missing_fields:
                 raise ValidationError(
                     {field: "This field is required when training_mode is rolling." for field in missing_fields}
                 )
             if self.rolling_window_size is not None and self.rolling_window_size <= 0:
                 raise ValidationError({"rolling_window_size": "Window size must be a positive integer."})
-            if (
-                self.rolling_window_start_date is not None
-                and self.rolling_window_end_date is not None
-                and self.rolling_window_start_date > self.rolling_window_end_date
-            ):
-                raise ValidationError(
-                    {"rolling_window_end_date": "End date must be on or after start date."}
-                )
 
     @property
     def bundle_dataset(self):

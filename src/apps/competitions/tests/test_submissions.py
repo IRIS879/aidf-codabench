@@ -321,6 +321,9 @@ class MultipleTasksPerPhaseTests(SubmissionTestCase):
 
     def test_rolling_competition_routes_to_rolling_queue(self):
         self.comp.training_mode = 'rolling'
+        self.comp.period_col = 'yyyy'
+        self.comp.rolling_start_period = '2018'
+        self.comp.rolling_end_period = '2019'
         self.comp.rolling_window_size = 2
         self.comp.rolling_window_start_date = date(2018, 1, 1)
         self.comp.rolling_window_end_date = date(2019, 1, 1)
@@ -338,6 +341,9 @@ class MultipleTasksPerPhaseTests(SubmissionTestCase):
                 run_submission(submission.pk)
                 assert celery_app.call_args[1]['queue'] == 'compute-worker-rolling'
                 assert celery_app.call_args[1]['args'][0]['training_mode'] == 'rolling'
+                assert celery_app.call_args[1]['args'][0]['period_col'] == 'yyyy'
+                assert celery_app.call_args[1]['args'][0]['rolling_start_period'] == '2018'
+                assert celery_app.call_args[1]['args'][0]['rolling_end_period'] == '2019'
 
 
 class FactSheetTests(SubmissionTestCase):

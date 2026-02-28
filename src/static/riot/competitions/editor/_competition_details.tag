@@ -53,16 +53,21 @@
         </div>
 
         <div class="field" show="{ is_rolling_mode() }">
+            <label>Period column</label>
+            <small>Column used to order/split data for rolling windows (e.g., yyyy, year, month, period).</small>
+            <input type="text" ref="period_col" placeholder="yyyy" onchange="{form_updated}">
+        </div>
+        <div class="field" show="{ is_rolling_mode() }">
             <label>Rolling Window Size</label>
             <input type="number" min="1" ref="rolling_window_size" onchange="{form_updated}">
         </div>
         <div class="field" show="{ is_rolling_mode() }">
-            <label>Rolling Start Date</label>
-            <input type="date" ref="rolling_window_start_date" onchange="{form_updated}">
+            <label>Start period</label>
+            <input type="text" ref="rolling_start_period" placeholder="e.g., 2020 or 2024-01" onchange="{form_updated}">
         </div>
         <div class="field" show="{ is_rolling_mode() }">
-            <label>Rolling End Date</label>
-            <input type="date" ref="rolling_window_end_date" onchange="{form_updated}">
+            <label>End period</label>
+            <input type="text" ref="rolling_end_period" placeholder="e.g., 2025 or 2024-12" onchange="{form_updated}">
         </div>
 
         <!--  Docker Image  -->
@@ -357,13 +362,17 @@
             self.data['contact_email'] = $(self.refs.contact_email).val()
             self.data['report'] = $(self.refs.report).val()
             if (self.data["training_mode"] === "rolling") {
+                self.data["period_col"] = (self.refs.period_col.value || '').trim()
+                self.data["rolling_start_period"] = (self.refs.rolling_start_period.value || '').trim()
+                self.data["rolling_end_period"] = (self.refs.rolling_end_period.value || '').trim()
                 self.data["rolling_window_size"] = self.refs.rolling_window_size.value ? parseInt(self.refs.rolling_window_size.value) : null
-                self.data["rolling_window_start_date"] = self.refs.rolling_window_start_date.value || null
-                self.data["rolling_window_end_date"] = self.refs.rolling_window_end_date.value || null
-                if (!self.data["rolling_window_size"] || !self.data["rolling_window_start_date"] || !self.data["rolling_window_end_date"]) {
+                if (!self.data["period_col"] || !self.data["rolling_start_period"] || !self.data["rolling_end_period"] || !self.data["rolling_window_size"]) {
                     is_valid = false
                 }
             } else {
+                self.data["period_col"] = null
+                self.data["rolling_start_period"] = null
+                self.data["rolling_end_period"] = null
                 self.data["rolling_window_size"] = null
                 self.data["rolling_window_start_date"] = null
                 self.data["rolling_window_end_date"] = null
@@ -505,9 +514,14 @@
             self.refs.make_programs_available.checked = competition.make_programs_available
             self.refs.make_input_data_available.checked = competition.make_input_data_available
             $(self.refs.training_mode).dropdown('set selected', competition.training_mode || 'static')
+            $(self.refs.period_col).val(competition.period_col || '')
+            $(self.refs.rolling_start_period).val(
+                competition.rolling_start_period || competition.rolling_window_start_date || ''
+            )
+            $(self.refs.rolling_end_period).val(
+                competition.rolling_end_period || competition.rolling_window_end_date || ''
+            )
             $(self.refs.rolling_window_size).val(competition.rolling_window_size)
-            $(self.refs.rolling_window_start_date).val(competition.rolling_window_start_date)
-            $(self.refs.rolling_window_end_date).val(competition.rolling_window_end_date)
             $(self.refs.docker_image).val(competition.docker_image)
             $(self.refs.reward).val(competition.reward)
             $(self.refs.contact_email).val(competition.contact_email)

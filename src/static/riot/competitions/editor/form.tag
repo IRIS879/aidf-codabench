@@ -135,5 +135,9 @@ CODALAB.events.on('competition_data_update', function (data) {
     Object.assign(self.competition, data)
     self.update()
 })
+
+self.on('mount', function () {
+    $('.menu .item').tab()
+})
 </script>
 </competition-form>

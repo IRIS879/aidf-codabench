@@ -272,7 +272,11 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'contact_email',
             'report',
             'whitelist_emails',
-            'forum_enabled'
+            'forum_enabled',
+            'training_mode',
+            'rolling_window_size',
+            'rolling_window_start_date',
+            'rolling_window_end_date',
         )
 
     def validate_phases(self, phases):
@@ -301,6 +305,42 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             if value['type'] not in valid_question_types:
                 raise ValidationError(f"{value['type']} is not a valid question type")
         return fact_sheet
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        training_mode = attrs.get('training_mode')
+        if training_mode is None and self.instance is not None:
+            training_mode = self.instance.training_mode
+        if training_mode is None:
+            training_mode = Competition.TRAINING_MODE_STATIC
+
+        rolling_window_size = attrs.get('rolling_window_size')
+        rolling_window_start_date = attrs.get('rolling_window_start_date')
+        rolling_window_end_date = attrs.get('rolling_window_end_date')
+        if self.instance is not None:
+            if rolling_window_size is None:
+                rolling_window_size = self.instance.rolling_window_size
+            if rolling_window_start_date is None:
+                rolling_window_start_date = self.instance.rolling_window_start_date
+            if rolling_window_end_date is None:
+                rolling_window_end_date = self.instance.rolling_window_end_date
+
+        if training_mode == Competition.TRAINING_MODE_ROLLING:
+            if rolling_window_size is None:
+                raise ValidationError({"rolling_window_size": "This field is required for rolling window mode."})
+            if rolling_window_start_date is None:
+                raise ValidationError({"rolling_window_start_date": "This field is required for rolling window mode."})
+            if rolling_window_end_date is None:
+                raise ValidationError({"rolling_window_end_date": "This field is required for rolling window mode."})
+            if rolling_window_size <= 0:
+                raise ValidationError({"rolling_window_size": "Window size must be a positive integer."})
+            if rolling_window_start_date > rolling_window_end_date:
+                raise ValidationError({"rolling_window_end_date": "End date must be on or after start date."})
+        else:
+            attrs['rolling_window_size'] = None
+            attrs['rolling_window_start_date'] = None
+            attrs['rolling_window_end_date'] = None
+        return attrs
 
     def create(self, validated_data):
         if 'logo' not in validated_data:
@@ -417,7 +457,11 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'contact_email',
             'report',
             'whitelist_emails',
-            'forum_enabled'
+            'forum_enabled',
+            'training_mode',
+            'rolling_window_size',
+            'rolling_window_start_date',
+            'rolling_window_end_date',
         )
 
     def get_leaderboards(self, instance):

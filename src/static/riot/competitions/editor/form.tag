@@ -254,7 +254,14 @@
                         var errors = JSON.parse(response.responseText);
 
                         // to make errors clearer, move errors for "detail" page into the errors "details" key
-                        var details_section_fields = ['title', 'logo']
+                        var details_section_fields = [
+                            'title',
+                            'logo',
+                            'training_mode',
+                            'rolling_window_size',
+                            'rolling_window_start_date',
+                            'rolling_window_end_date'
+                        ]
                         details_section_fields.forEach(function (field) {
                             if (errors[field]) {
                                 // initialize section, if not already

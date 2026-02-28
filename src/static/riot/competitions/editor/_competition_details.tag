@@ -38,6 +38,33 @@
             <select class="ui fluid search selection dropdown" ref="queue"></select>
         </div>
 
+        <!--  Training mode  -->
+        <div class="field">
+            <label>Training Mode</label>
+            <div ref="training_mode" class="ui selection dropdown">
+                <input type="hidden" name="training_mode" value="{ data.training_mode || 'static' }" onchange="{form_updated}">
+                <div class="text">Static split</div>
+                <i class="dropdown icon"></i>
+                <div class="menu">
+                    <div class="item" data-value="static">Static split</div>
+                    <div class="item" data-value="rolling">Rolling window</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="field" show="{ is_rolling_mode() }">
+            <label>Rolling Window Size</label>
+            <input type="number" min="1" ref="rolling_window_size" onchange="{form_updated}">
+        </div>
+        <div class="field" show="{ is_rolling_mode() }">
+            <label>Rolling Start Date</label>
+            <input type="date" ref="rolling_window_start_date" onchange="{form_updated}">
+        </div>
+        <div class="field" show="{ is_rolling_mode() }">
+            <label>Rolling End Date</label>
+            <input type="date" ref="rolling_window_end_date" onchange="{form_updated}">
+        </div>
+
         <!--  Docker Image  -->
         <div class="field required">
             <label>Competition Docker Image</label>
@@ -280,6 +307,12 @@
             $(self.refs.competition_type).dropdown({
                 onChange: self.form_updated,
             })
+            $(self.refs.training_mode).dropdown({
+                onChange: function () {
+                    self.update()
+                    self.form_updated()
+                },
+            })
             $(self.refs.queue).dropdown({
                 // Note: Passing `public=true` so default behavior is users can search for public queues
                 apiSettings: {
@@ -308,6 +341,7 @@
             self.data["title"] = self.refs.title.value
             self.data["description"] = self.markdown_editor.value()
             self.data["queue"] = self.refs.queue.value
+            self.data["training_mode"] = $(self.refs.training_mode).dropdown('get value') || 'static'
             self.data["enable_detailed_results"] = self.refs.detailed_results.checked
             self.data["show_detailed_results_in_submission_panel"] = self.refs.show_detailed_results_in_submission_panel.checked
             self.data["show_detailed_results_in_leaderboard"] = self.refs.show_detailed_results_in_leaderboard.checked
@@ -322,6 +356,18 @@
             self.data['reward'] = $(self.refs.reward).val()
             self.data['contact_email'] = $(self.refs.contact_email).val()
             self.data['report'] = $(self.refs.report).val()
+            if (self.data["training_mode"] === "rolling") {
+                self.data["rolling_window_size"] = self.refs.rolling_window_size.value ? parseInt(self.refs.rolling_window_size.value) : null
+                self.data["rolling_window_start_date"] = self.refs.rolling_window_start_date.value || null
+                self.data["rolling_window_end_date"] = self.refs.rolling_window_end_date.value || null
+                if (!self.data["rolling_window_size"] || !self.data["rolling_window_start_date"] || !self.data["rolling_window_end_date"]) {
+                    is_valid = false
+                }
+            } else {
+                self.data["rolling_window_size"] = null
+                self.data["rolling_window_start_date"] = null
+                self.data["rolling_window_end_date"] = null
+            }
             if (self.data.fact_sheet === false){
                 is_valid = false
             }
@@ -429,6 +475,10 @@
             self.get_available_queues(filters)
         }
 
+        self.is_rolling_mode = function () {
+            return (($(self.refs.training_mode).dropdown('get value') || self.data.training_mode || 'static') === 'rolling')
+        }
+
 
         /*---------------------------------------------------------------------
          Events
@@ -454,6 +504,10 @@
             self.refs.forum_enabled.checked = competition.forum_enabled
             self.refs.make_programs_available.checked = competition.make_programs_available
             self.refs.make_input_data_available.checked = competition.make_input_data_available
+            $(self.refs.training_mode).dropdown('set selected', competition.training_mode || 'static')
+            $(self.refs.rolling_window_size).val(competition.rolling_window_size)
+            $(self.refs.rolling_window_start_date).val(competition.rolling_window_start_date)
+            $(self.refs.rolling_window_end_date).val(competition.rolling_window_end_date)
             $(self.refs.docker_image).val(competition.docker_image)
             $(self.refs.reward).val(competition.reward)
             $(self.refs.contact_email).val(competition.contact_email)

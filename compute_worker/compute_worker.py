@@ -151,12 +151,20 @@ def setup_celery_logging(**kwargs):
 # Init celery + rabbit queue definitions
 app = Celery()
 app.config_from_object("celery_config")  # grabs celery_config.py
+QUEUE_STATIC = os.environ.get("QUEUE_STATIC", "compute-worker-static")
+QUEUE_ROLLING = os.environ.get("QUEUE_ROLLING", "compute-worker-rolling")
 app.conf.task_queues = [
     # Mostly defining queue here so we can set x-max-priority
     Queue(
-        "compute-worker",
-        Exchange("compute-worker"),
-        routing_key="compute-worker",
+        QUEUE_STATIC,
+        Exchange(QUEUE_STATIC),
+        routing_key=QUEUE_STATIC,
+        queue_arguments={"x-max-priority": 10},
+    ),
+    Queue(
+        QUEUE_ROLLING,
+        Exchange(QUEUE_ROLLING),
+        routing_key=QUEUE_ROLLING,
         queue_arguments={"x-max-priority": 10},
     ),
 ]
@@ -216,6 +224,15 @@ class ExecutionTimeLimitExceeded(Exception):
 # -----------------------------------------------------------------------------
 @shared_task(name="compute_worker_run")
 def run_wrapper(run_args):
+    job_id = run_args.get("id")
+    competition_id = run_args.get("competition_id")
+    training_mode = run_args.get("training_mode", "static")
+    logger.info(
+        "Worker accepted job_id=%s competition_id=%s training_mode=%s",
+        job_id,
+        competition_id,
+        training_mode,
+    )
     logger.info(f"Received run arguments: \n {colorize_run_args(json.dumps(run_args))}")
     run = Run(run_args)
 
@@ -357,7 +374,9 @@ class Run:
             "ingestion_only_during_scoring"
         )
         self.detailed_results_url = run_args.get("detailed_results_url")
-        self.rolling_enabled = True
+        self.competition_id = run_args.get("competition_id")
+        self.training_mode = run_args.get("training_mode", "static")
+        self.rolling_enabled = self.training_mode == "rolling"
         self.rolling_start_year = run_args.get(
             "rolling_start_year", run_args.get("start_year", 2018)
         )
@@ -2193,12 +2212,21 @@ class Run:
         signal.alarm(self.execution_time_limit)
         try:
             if self.is_scoring:
-                self._run_static_and_rolling(program_dir, ingestion_program_dir)
-                if self.combined_scores is not None:
-                    scores_path = os.path.join(self.output_dir, "scores.json")
-                    with open(scores_path, "w") as scores_file:
-                        json.dump(self.combined_scores, scores_file, indent=2)
-                    logger.info("Wrote combined scores.json: %s", scores_path)
+                if self.rolling_enabled:
+                    self._run_static_and_rolling(program_dir, ingestion_program_dir)
+                    if self.combined_scores is not None:
+                        scores_path = os.path.join(self.output_dir, "scores.json")
+                        with open(scores_path, "w") as scores_file:
+                            json.dump(self.combined_scores, scores_file, indent=2)
+                        logger.info("Wrote combined scores.json: %s", scores_path)
+                else:
+                    logger.info("Running static scoring pipeline")
+                    self.logs = {}
+                    self.completed_program_counter = 0
+                    self.watch = True
+                    # Keep rolling behavior unchanged; only static scoring runs sequentially
+                    # so ingestion can materialize predictions before scoring consumes input/res.
+                    self._run_programs_sequential(program_dir, ingestion_program_dir)
             else:
                 logger.info("Running scoring program, and then ingestion program")
                 self.logs = {}
@@ -2294,7 +2322,14 @@ class Run:
             "elapsedTime": self.program_elapsed_time or self.ingestion_elapsed_time,
             "ingestionExitCode": self.ingestion_program_exit_code,
             "ingestionElapsedTime": self.ingestion_elapsed_time,
+            "jobId": self.submission_id,
+            "competitionId": self.competition_id,
+            "trainingMode": self.training_mode,
         }
+        if self.rolling_enabled:
+            prog_status["rollingWindowSize"] = self.rolling_window_size
+            prog_status["rollingStartYear"] = self.rolling_start_year
+            prog_status["rollingEndYear"] = self.rolling_end_year
 
         logger.info(f"Metadata output: {prog_status}")
 

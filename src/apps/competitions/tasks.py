@@ -51,7 +51,11 @@ COMPETITION_FIELDS = [
     "reward",
     "contact_email",
     "fact_sheet",
-    "forum_enabled"
+    "forum_enabled",
+    "training_mode",
+    "rolling_window_size",
+    "rolling_window_start_date",
+    "rolling_window_end_date",
 ]
 
 TASK_FIELDS = [
@@ -115,20 +119,42 @@ COLUMN_FIELDS = [
     'precision',
 ]
 MAX_EXECUTION_TIME_LIMIT = int(os.environ.get('MAX_EXECUTION_TIME_LIMIT', 600))  # time limit of the default queue
+COMPUTE_QUEUE_STATIC = os.environ.get('QUEUE_STATIC', 'compute-worker-static')
+COMPUTE_QUEUE_ROLLING = os.environ.get('QUEUE_ROLLING', 'compute-worker-rolling')
+
+
+def _compute_queue_for_submission(submission: Submission) -> str:
+    training_mode = submission.phase.competition.training_mode or Competition.TRAINING_MODE_STATIC
+    if training_mode == Competition.TRAINING_MODE_ROLLING:
+        return COMPUTE_QUEUE_ROLLING
+    return COMPUTE_QUEUE_STATIC
 
 
 def _send_to_compute_worker(submission, is_scoring):
+    competition = submission.phase.competition
+    training_mode = competition.training_mode or Competition.TRAINING_MODE_STATIC
     run_args = {
         "user_pk": submission.owner.pk,
         "submissions_api_url": settings.SUBMISSIONS_API_URL,
         "secret": submission.secret,
-        "docker_image": submission.phase.competition.docker_image,
+        "docker_image": competition.docker_image,
         "execution_time_limit": min(MAX_EXECUTION_TIME_LIMIT, submission.phase.execution_time_limit),
         "id": submission.pk,
         "is_scoring": is_scoring,
+        "competition_id": competition.pk,
+        "training_mode": training_mode,
     }
+    if training_mode == Competition.TRAINING_MODE_ROLLING:
+        run_args["rolling_window_size"] = competition.rolling_window_size
+        run_args["rolling_start_year"] = (
+            competition.rolling_window_start_date.year if competition.rolling_window_start_date else None
+        )
+        run_args["rolling_end_year"] = (
+            competition.rolling_window_end_date.year if competition.rolling_window_end_date else None
+        )
+    worker_queue = _compute_queue_for_submission(submission)
 
-    if not submission.detailed_result.name and submission.phase.competition.enable_detailed_results:
+    if not submission.detailed_result.name and competition.enable_detailed_results:
         submission.detailed_result.save('detailed_results.html', ContentFile(''.encode()))  # must encode here for GCS
         submission.save(update_fields=['detailed_result'])
     if not submission.prediction_result.name:
@@ -157,7 +183,7 @@ def _send_to_compute_worker(submission, is_scoring):
             permission='w'
         )
     else:
-        if submission.phase.competition.enable_detailed_results:
+        if competition.enable_detailed_results:
             run_args['detailed_results_url'] = make_url_sassy(
                 path=submission.detailed_result.name,
                 permission='w',
@@ -208,15 +234,22 @@ def _send_to_compute_worker(submission, is_scoring):
     for detail_name in detail_names:
         run_args[detail_name] = create_detailed_output_file(detail_name, submission)
 
-    logger.info(f"Task data for submission id = {submission.id}")
+    logger.info(
+        "Dispatching submission=%s competition=%s training_mode=%s scoring=%s queue=%s",
+        submission.id,
+        competition.id,
+        training_mode,
+        is_scoring,
+        worker_queue,
+    )
     logger.info(run_args)
 
     # Pad timelimit so worker has time to cleanup
     time_padding = 60 * 20  # 20 minutes
     time_limit = submission.phase.execution_time_limit + time_padding
 
-    if submission.phase.competition.queue:  # if the competition is running on a custom queue, not the default queue
-        submission.queue_name = submission.phase.competition.queue.name or ''
+    if competition.queue:  # if the competition is running on a custom queue, not the default queue
+        submission.queue_name = competition.queue.name or ''
         run_args['execution_time_limit'] = submission.phase.execution_time_limit  # use the competition time limit
         submission.save()
 
@@ -224,11 +257,11 @@ def _send_to_compute_worker(submission, is_scoring):
         # variable above
         celery_app = app_or_default()
         with celery_app.connection() as new_connection:
-            new_connection.virtual_host = str(submission.phase.competition.queue.vhost)
+            new_connection.virtual_host = str(competition.queue.vhost)
             task = celery_app.send_task(
                 'compute_worker_run',
                 args=(run_args,),
-                queue='compute-worker',
+                queue=worker_queue,
                 soft_time_limit=time_limit,
                 connection=new_connection,
                 priority=priority,
@@ -237,11 +270,19 @@ def _send_to_compute_worker(submission, is_scoring):
         task = app.send_task(
             'compute_worker_run',
             args=(run_args,),
-            queue='compute-worker',
+            queue=worker_queue,
             soft_time_limit=time_limit,
             priority=priority,
         )
     submission.celery_task_id = task.id
+    logger.info(
+        "Queued celery task_id=%s submission=%s competition=%s training_mode=%s queue=%s",
+        task.id,
+        submission.id,
+        competition.id,
+        training_mode,
+        worker_queue,
+    )
 
     if submission.status == Submission.SUBMITTING:
         # Don't want to mark an already-prepared submission as "submitted" again, so

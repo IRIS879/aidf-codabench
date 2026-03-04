@@ -569,13 +569,6 @@
         CODALAB.events.on('update_codemirror', () => {
             self.markdown_editor.codemirror.refresh()
         })
-      })
-
-      $(self.refs.competition_type).dropdown({ onChange: self.form_updated })
-      $(self.refs.queue).dropdown({ onChange: self.form_updated })
-
-      self.form_updated()
-    })
 
     self.form_updated = function () {
       // Update data FIRST

@@ -1,5 +1,5 @@
 from celery import shared_task
-from django.conf import settings
+import s3_client
 from .models import Submission
 import json
 import tempfile
@@ -13,8 +13,8 @@ def parse_model_card(submission_id):
 
     try:
         # Download PDF from S3
-        response = settings.s3_client.get_object(
-            Bucket=settings.S3_BUCKET,
+        response = s3_client.s3_client.get_object(
+            Bucket=s3_client.S3_BUCKET,
             Key=submission.model_card_s3_key,
         )
 

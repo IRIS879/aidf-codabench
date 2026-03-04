@@ -85,57 +85,36 @@ self.competition = {}
 self.errors = {}
 
 self.save = function () {
-
     self.competition.published = self.refs.publish.checked
 
     var api_endpoint = self.opts.competition_id
         ? CODALAB.api.update_competition
         : CODALAB.api.create_competition
 
-                        // to make errors clearer, move errors for "detail" page into the errors "details" key
-                        var details_section_fields = [
-                            'title',
-                            'logo',
-                            'training_mode',
-                            'period_col',
-                            'rolling_start_period',
-                            'rolling_end_period',
-                            'rolling_window_size',
-                            'rolling_window_start_date',
-                            'rolling_window_end_date'
-                        ]
-                        details_section_fields.forEach(function (field) {
-                            if (errors[field]) {
-                                // initialize section, if not already
-                                errors.details = errors.details || []
+    var competition_return = Object.assign({}, self.competition)
 
-    // =========================
-    // FIX: Ensure title exists
-    // =========================
-    self.competition_return.title = (self.competition_return.title || "").trim()
-
-    if (
-        !self.competition_return.title &&
-        self.tags &&
-        self.tags["competition-details"] &&
-        self.tags["competition-details"].refs &&
-        self.tags["competition-details"].refs.title
-    ) {
-        self.competition_return.title =
-            (self.tags["competition-details"].refs.title.value || "").trim()
+    if (!competition_return.title) {
+        var detail_tag = self.tags && self.tags["competition-details"]
+        var detail_title = detail_tag && detail_tag.refs && detail_tag.refs.title
+        if (detail_title && detail_title.value) {
+            competition_return.title = detail_title.value.trim()
+        }
     }
 
-    if (!self.competition_return.title) {
+    if (!competition_return.title) {
         toastr.error("Title is missing. Enter a title in Details tab.")
         return
     }
 
-    api_endpoint(self.competition_return, self.opts.competition_id)
+    api_endpoint(competition_return, self.opts.competition_id)
         .done(function (response) {
+            self.errors = {}
             toastr.success("Competition saved!")
             window.location.href = window.URLS.COMPETITION_DETAIL(response.id)
         })
         .fail(function (response) {
+            self.errors = response.responseJSON || {}
+            self.update()
             toastr.error("Error occurred while saving.")
         })
 }

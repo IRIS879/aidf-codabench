@@ -1,7 +1,7 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from django.conf import settings
+import s3_client
 import uuid
 
 @api_view(["POST"])
@@ -16,9 +16,9 @@ def upload_model_card(request, submission_id):
 
     key = f"model_cards/{submission.id}/{uuid.uuid4()}.pdf"
 
-    settings.s3_client.upload_fileobj(
+    s3_client.s3_client.upload_fileobj(
         pdf_file,
-        settings.S3_BUCKET,
+        s3_client.S3_BUCKET,
         key,
         ExtraArgs={"ContentType": "application/pdf"},
     )

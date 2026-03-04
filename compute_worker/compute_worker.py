@@ -1,7 +1,10 @@
 import asyncio
+import csv
+import datetime as dt
 import glob
 import hashlib
 import json
+import math
 import os
 import shutil
 import signal
@@ -37,6 +40,10 @@ import logging
 logger = logging.getLogger(__name__)
 from logs_loguru import configure_logging, colorize_run_args
 import json
+try:
+    import pandas as pd
+except Exception:
+    pd = None
 
 
 # -----------------------------------------------
@@ -149,12 +156,20 @@ def setup_celery_logging(**kwargs):
 # Init celery + rabbit queue definitions
 app = Celery()
 app.config_from_object("celery_config")  # grabs celery_config.py
+QUEUE_STATIC = os.environ.get("QUEUE_STATIC", "compute-worker-static")
+QUEUE_ROLLING = os.environ.get("QUEUE_ROLLING", "compute-worker-rolling")
 app.conf.task_queues = [
     # Mostly defining queue here so we can set x-max-priority
     Queue(
-        "compute-worker",
-        Exchange("compute-worker"),
-        routing_key="compute-worker",
+        QUEUE_STATIC,
+        Exchange(QUEUE_STATIC),
+        routing_key=QUEUE_STATIC,
+        queue_arguments={"x-max-priority": 10},
+    ),
+    Queue(
+        QUEUE_ROLLING,
+        Exchange(QUEUE_ROLLING),
+        routing_key=QUEUE_ROLLING,
         queue_arguments={"x-max-priority": 10},
     ),
 ]
@@ -214,6 +229,15 @@ class ExecutionTimeLimitExceeded(Exception):
 # -----------------------------------------------------------------------------
 @shared_task(name="compute_worker_run")
 def run_wrapper(run_args):
+    job_id = run_args.get("id")
+    competition_id = run_args.get("competition_id")
+    training_mode = run_args.get("training_mode", "static")
+    logger.info(
+        "Worker accepted job_id=%s competition_id=%s training_mode=%s",
+        job_id,
+        competition_id,
+        training_mode,
+    )
     logger.info(f"Received run arguments: \n {colorize_run_args(json.dumps(run_args))}")
     run = Run(run_args)
 
@@ -239,12 +263,7 @@ def replace_legacy_metadata_command(
     vars_to_replace = [
         ("$input", "/app/input_data" if kind == "ingestion" else "/app/input"),
         ("$output", "/app/output"),
-        (
-            "$program",
-            "/app/ingestion_program"
-            if ingestion_only_during_scoring and is_scoring
-            else "/app/program",
-        ),
+        ("$program", "/app/program"),
         ("$ingestion_program", "/app/program"),
         ("$hidden", "/app/input/ref"),
         ("$shared", "/app/shared"),
@@ -355,15 +374,35 @@ class Run:
         self.ingestion_program_data = run_args.get("ingestion_program")
         self.input_data = run_args.get("input_data")
         self.reference_data = run_args.get("reference_data")
+        self.submission_data = run_args.get("submission_data")
         self.ingestion_only_during_scoring = run_args.get(
             "ingestion_only_during_scoring"
         )
         self.detailed_results_url = run_args.get("detailed_results_url")
+        self.competition_id = run_args.get("competition_id")
+        self.training_mode = run_args.get("training_mode", "static")
+        self.rolling_enabled = self.training_mode == "rolling"
+        self.rolling_start_year = run_args.get(
+            "rolling_start_year", run_args.get("start_year", 2018)
+        )
+        self.rolling_end_year = run_args.get(
+            "rolling_end_year", run_args.get("end_year", 2019)
+        )
+        self.rolling_window_size = int(
+            run_args.get("window_size", run_args.get("rolling_window_size", 2))
+        )
+        self.rolling_period_col = run_args.get("period_col", run_args.get("year_col", "yyyy")) or "yyyy"
+        self.rolling_start_period = run_args.get("rolling_start_period")
+        self.rolling_end_period = run_args.get("rolling_end_period")
+        self.period_sort_strategy = None
+        self.period_key_to_label = {}
+        self.period_keys_ordered = []
 
         # During prediction program will be the submission program, during scoring it will be the
         # scoring program
         self.program_exit_code = None
         self.ingestion_program_exit_code = None
+        self.combined_scores = None
 
         self.program_elapsed_time = None
         self.ingestion_elapsed_time = None
@@ -624,6 +663,7 @@ class Run:
                 # Extract the contents to destination directory
                 with ZipFile(bundle_file, "r") as z:
                     z.extractall(os.path.join(self.root_dir, destination))
+                self._normalize_single_root_dir(os.path.join(self.root_dir, destination))
                 break  # Break if the loop is successful
             except BadZipFile:
                 retries += 1
@@ -634,6 +674,30 @@ class Run:
                     time.sleep(60)  # Wait 60 seconds before retrying
         # Return the zip file path for other uses, e.g. for creating a MD5 hash to identify it
         return bundle_file
+
+    def _normalize_single_root_dir(self, root_dir):
+        if not os.path.isdir(root_dir):
+            return
+        entries = os.listdir(root_dir)
+        if not entries:
+            return
+        child_dirs = [
+            entry
+            for entry in entries
+            if os.path.isdir(os.path.join(root_dir, entry))
+        ]
+        child_files = [
+            entry
+            for entry in entries
+            if os.path.isfile(os.path.join(root_dir, entry))
+        ]
+        if len(child_dirs) != 1 or child_files:
+            return
+        single_dir = os.path.join(root_dir, child_dirs[0])
+        for entry in os.listdir(single_dir):
+            shutil.move(os.path.join(single_dir, entry), os.path.join(root_dir, entry))
+        shutil.rmtree(single_dir)
+        logger.info("Normalized single-root bundle directory: %s", root_dir)
 
     async def _run_container_engine_cmd(self, container, kind):
         """This runs a command and asynchronously writes the data to both a storage file
@@ -793,7 +857,9 @@ class Run:
 
         return path
 
-    async def _run_program_directory(self, program_dir, kind):
+    async def _run_program_directory(
+        self, program_dir, kind, input_data_dir=None, input_ref_dir=None
+    ):
         """
         Function responsible for running program directory
 
@@ -821,7 +887,7 @@ class Run:
                 )
                 # Copy submission files into prediction output
                 # This is useful for results submissions but wrongly uses storage
-                shutil.copytree(program_dir, self.output_dir)
+                shutil.copytree(program_dir, self.output_dir, dirs_exist_ok=True)
                 return
             else:
                 raise SubmissionException(
@@ -873,7 +939,9 @@ class Run:
 
         if kind == "ingestion":
             # program here is either scoring program or submission, depends on if this ran during Prediction or Scoring
-            if self.ingestion_only_during_scoring and self.is_scoring:
+            if self.is_scoring and self.rolling_enabled and self.submission_data:
+                ingested_program_location = "input/res"
+            elif self.ingestion_only_during_scoring and self.is_scoring:
                 # submission program moved to 'input/res' with shutil.move() above
                 ingested_program_location = "input/res"
             else:
@@ -909,10 +977,20 @@ class Run:
             volumes_config.update(tempvolumeConfig)
 
         if self.input_data:
-            volumes_host.extend([self._get_host_path(self.root_dir, "input_data")])
+            input_data_dir = input_data_dir or os.path.join(self.root_dir, "input_data")
+            volumes_host.extend([self._get_host_path(input_data_dir)])
             tempvolumeConfig = {
                 volumes_host[-1]: {
                     "bind": "/app/input_data",
+                }
+            }
+            volumes_config.update(tempvolumeConfig)
+
+        if input_ref_dir:
+            volumes_host.extend([self._get_host_path(input_ref_dir)])
+            tempvolumeConfig = {
+                volumes_host[-1]: {
+                    "bind": "/app/input/ref",
                 }
             }
             volumes_config.update(tempvolumeConfig)
@@ -999,6 +1077,1147 @@ class Run:
             if os.environ.get("LOG_LEVEL", "info").lower() == "debug":
                 logger.exception(e)
 
+    def _ensure_clean_dir(self, path):
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        os.makedirs(path, exist_ok=True)
+
+    def _clean_output_dir(self, keep_dirs=None):
+        keep_dirs = set(keep_dirs or [])
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir, exist_ok=True)
+            return
+        for name in os.listdir(self.output_dir):
+            if name in keep_dirs:
+                continue
+            path = os.path.join(self.output_dir, name)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+    def _log_round_input_tree(self, round_input_dir, year):
+        logger.info(f"ROLLING ROUND: {year}")
+        try:
+            logger.info(
+                "input_data_round contents: "
+                + ", ".join(sorted(os.listdir(round_input_dir)))
+            )
+        except FileNotFoundError:
+            logger.info("input_data_round contents: MISSING")
+            return
+
+        for dirpath, _, filenames in os.walk(round_input_dir):
+            rel_dir = os.path.relpath(dirpath, round_input_dir)
+            rel_dir = "." if rel_dir == "." else rel_dir
+            for filename in sorted(filenames):
+                logger.info(f"input_data_round file: {rel_dir}/{filename}")
+
+        train_matches = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+        logger.info(
+            "input_data_round train matches (root only): "
+            + (", ".join(sorted(train_matches)) if train_matches else "NONE")
+        )
+
+    def _list_files(self, root_dir):
+        for dirpath, _, filenames in os.walk(root_dir):
+            for filename in filenames:
+                if filename.startswith("._"):
+                    continue
+                full_path = os.path.join(dirpath, filename)
+                rel_path = os.path.relpath(full_path, root_dir)
+                yield full_path, rel_path
+
+    def _available_columns_str(self, header, max_cols=20):
+        if not header:
+            return "[]"
+        cols = header[:max_cols]
+        suffix = " ..." if len(header) > max_cols else ""
+        return "[" + ", ".join(cols) + "]" + suffix
+
+    def _to_period_key(self, value, strategy):
+        text = str(value).strip() if value is not None else ""
+        if not text:
+            return None
+
+        if strategy == "numeric":
+            try:
+                return float(text)
+            except (TypeError, ValueError):
+                return None
+
+        if strategy == "datetime":
+            if pd is not None:
+                parsed = pd.to_datetime([text], errors="coerce")
+                if not parsed.isna().all():
+                    return parsed.iloc[0].to_pydatetime()
+                return None
+            try:
+                return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+        return text
+
+    def _detect_period_strategy(self, period_values):
+        if not period_values:
+            return "lexicographic"
+
+        numeric_ok = True
+        for value in period_values:
+            try:
+                float(str(value).strip())
+            except (TypeError, ValueError):
+                numeric_ok = False
+                break
+        if numeric_ok:
+            return "numeric"
+
+        if pd is not None:
+            parsed = pd.to_datetime(period_values, errors="coerce")
+            if not parsed.isna().any():
+                return "datetime"
+        else:
+            parsed_ok = True
+            for value in period_values:
+                try:
+                    dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+                except ValueError:
+                    parsed_ok = False
+                    break
+            if parsed_ok:
+                return "datetime"
+
+        return "lexicographic"
+
+    def _normalize_boundary_key(self, boundary_value, strategy):
+        if boundary_value is None:
+            return None
+        key = self._to_period_key(boundary_value, strategy)
+        if key is not None:
+            return key
+        if strategy == "numeric" and isinstance(boundary_value, str):
+            if pd is not None:
+                parsed = pd.to_datetime([boundary_value], errors="coerce")
+                if not parsed.isna().all():
+                    return float(parsed.iloc[0].year)
+        return None
+
+    def _get_period_col_index(self, header, src_path):
+        if self.rolling_period_col not in header:
+            raise SubmissionException(
+                f"Period column '{self.rolling_period_col}' not found in {src_path}. "
+                f"Available columns: {self._available_columns_str(header)}"
+            )
+        return header.index(self.rolling_period_col)
+
+    def _build_period_catalog(self):
+        master_csv = self._find_first_csv(os.path.join(self.root_dir, "input_data"))
+        if not master_csv:
+            raise SubmissionException("Rolling enabled but no input data found.")
+
+        with open(master_csv, newline="") as src_file:
+            reader = csv.reader(src_file)
+            header = next(reader, None)
+            if not header:
+                raise SubmissionException(f"Input data CSV is empty: {master_csv}")
+            period_idx = self._get_period_col_index(header, master_csv)
+            raw_values = []
+            for row in reader:
+                if len(row) <= period_idx:
+                    continue
+                raw_val = row[period_idx]
+                if raw_val is None or str(raw_val).strip() == "":
+                    continue
+                raw_values.append(str(raw_val).strip())
+
+        if not raw_values:
+            raise SubmissionException(
+                f"Could not infer rolling periods from column '{self.rolling_period_col}' in {master_csv}."
+            )
+
+        strategy = self._detect_period_strategy(raw_values)
+        logger.info(
+            "Rolling period strategy for column '%s': %s",
+            self.rolling_period_col,
+            strategy,
+        )
+
+        key_to_label = {}
+        for raw_val in raw_values:
+            key = self._to_period_key(raw_val, strategy)
+            if key is None:
+                continue
+            if key not in key_to_label:
+                key_to_label[key] = raw_val
+
+        if not key_to_label:
+            raise SubmissionException(
+                f"Could not parse period values from column '{self.rolling_period_col}' in {master_csv}."
+            )
+
+        ordered_keys = sorted(key_to_label.keys())
+        self.period_sort_strategy = strategy
+        self.period_key_to_label = key_to_label
+        self.period_keys_ordered = ordered_keys
+        return ordered_keys
+
+    def _slice_csv_by_period(self, src_path, dst_path, predicate):
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        with open(src_path, newline="") as src_file, open(
+            dst_path, "w", newline=""
+        ) as dst_file:
+            reader = csv.reader(src_file)
+            writer = csv.writer(dst_file)
+            header = next(reader, None)
+            if not header:
+                return
+            period_idx = self._get_period_col_index(header, src_path)
+            writer.writerow(header)
+            for row in reader:
+                if len(row) <= period_idx:
+                    continue
+                period_val = self._to_period_key(row[period_idx], self.period_sort_strategy)
+                if period_val is None:
+                    continue
+                if predicate(period_val):
+                    writer.writerow(row)
+
+    def _slice_input_data(self, round_input_dir, period_key):
+        master_dir = os.path.join(self.root_dir, "input_data")
+        files = list(self._list_files(master_dir))
+        period_index = self.period_keys_ordered.index(period_key)
+        train_keys = set(
+            self.period_keys_ordered[
+                max(0, period_index - self.rolling_window_size):period_index
+            ]
+        )
+        test_keys = {period_key}
+        has_split_markers = any(
+            "train" in os.path.basename(path).lower()
+            or "test" in os.path.basename(path).lower()
+            for path, _ in files
+            if path.lower().endswith(".csv")
+        )
+
+        for src_path, rel_path in files:
+            lower_name = os.path.basename(src_path).lower()
+            is_csv = src_path.lower().endswith(".csv")
+
+            if not is_csv:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                continue
+
+            if has_split_markers:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                if "train" in lower_name:
+                    self._slice_csv_by_period(
+                        src_path,
+                        dst_path,
+                        lambda p: p in train_keys,
+                    )
+                elif "test" in lower_name:
+                    self._slice_csv_by_period(
+                        src_path,
+                        dst_path,
+                        lambda p: p in test_keys,
+                    )
+                else:
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+                continue
+
+            base_dir = os.path.dirname(rel_path)
+            base_name = os.path.basename(rel_path)
+            train_name = f"train_{base_name}"
+            test_name = f"test_{base_name}"
+            train_path = os.path.join(round_input_dir, base_dir, train_name)
+            test_path = os.path.join(round_input_dir, base_dir, test_name)
+            self._slice_csv_by_period(
+                src_path,
+                train_path,
+                lambda p: p in train_keys,
+            )
+            self._slice_csv_by_period(
+                src_path, test_path, lambda p: p in test_keys
+            )
+
+    def _slice_input_data_by_predicates(
+        self, round_input_dir, train_predicate, test_predicate
+    ):
+        master_dir = os.path.join(self.root_dir, "input_data")
+        files = list(self._list_files(master_dir))
+        has_split_markers = any(
+            "train" in os.path.basename(path).lower()
+            or "test" in os.path.basename(path).lower()
+            for path, _ in files
+            if path.lower().endswith(".csv")
+        )
+
+        for src_path, rel_path in files:
+            lower_name = os.path.basename(src_path).lower()
+            is_csv = src_path.lower().endswith(".csv")
+
+            if not is_csv:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                continue
+
+            if has_split_markers:
+                dst_path = os.path.join(round_input_dir, rel_path)
+                if "train" in lower_name:
+                    self._slice_csv_by_period(
+                        src_path,
+                        dst_path,
+                        train_predicate,
+                    )
+                elif "test" in lower_name:
+                    self._slice_csv_by_period(
+                        src_path,
+                        dst_path,
+                        test_predicate,
+                    )
+                else:
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+                continue
+
+            base_dir = os.path.dirname(rel_path)
+            base_name = os.path.basename(rel_path)
+            train_name = f"train_{base_name}"
+            test_name = f"test_{base_name}"
+            train_path = os.path.join(round_input_dir, base_dir, train_name)
+            test_path = os.path.join(round_input_dir, base_dir, test_name)
+            self._slice_csv_by_period(
+                src_path, train_path, train_predicate
+            )
+            self._slice_csv_by_period(
+                src_path, test_path, test_predicate
+            )
+
+    def _slice_reference_data(self, round_ref_dir, period_key):
+        master_dir = os.path.join(self.root_dir, "input", "ref")
+        for src_path, rel_path in self._list_files(master_dir):
+            if not src_path.lower().endswith(".csv"):
+                dst_path = os.path.join(round_ref_dir, rel_path)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                continue
+
+            dst_path = os.path.join(round_ref_dir, rel_path)
+            self._slice_csv_by_period(
+                src_path, dst_path, lambda p: p == period_key
+            )
+
+    def _prepare_round_data(self, period_key):
+        round_input_dir = os.path.join(self.root_dir, "input_data_round")
+        round_ref_dir = os.path.join(self.root_dir, "input_ref_round")
+        self._ensure_clean_dir(round_input_dir)
+        self._ensure_clean_dir(round_ref_dir)
+        self._slice_input_data(round_input_dir, period_key)
+        self._slice_reference_data(round_ref_dir, period_key)
+        self._merge_train_with_labels(round_input_dir, round_ref_dir)
+        return round_input_dir, round_ref_dir
+
+    def _prepare_static_data(self, evaluation_period_keys):
+        round_input_dir = os.path.join(self.root_dir, "input_data_static")
+        round_ref_dir = os.path.join(self.root_dir, "input_ref_static")
+        self._ensure_clean_dir(round_input_dir)
+        self._ensure_clean_dir(round_ref_dir)
+
+        first_eval_index = self.period_keys_ordered.index(evaluation_period_keys[0])
+        train_keys = set(
+            self.period_keys_ordered[
+                max(0, first_eval_index - self.rolling_window_size):first_eval_index
+            ]
+        )
+        eval_keys = set(evaluation_period_keys)
+        self._slice_input_data_by_predicates(
+            round_input_dir,
+            lambda p: p in train_keys,
+            lambda p: p in eval_keys,
+        )
+        self._merge_train_with_labels(round_input_dir, round_ref_dir)
+        return round_input_dir, round_ref_dir
+
+    def _count_csv_rows(self, path):
+        if not os.path.exists(path):
+            return 0
+        with open(path, newline="") as src_file:
+            reader = csv.reader(src_file)
+            header = next(reader, None)
+            if header is None:
+                return 0
+            return sum(1 for _ in reader)
+
+    def _pick_one_csv(self, paths, kind):
+        paths = [p for p in paths if os.path.basename(p) and not os.path.basename(p).startswith("._")]
+        if not paths:
+            raise SubmissionException(
+                f"No {kind} CSV file found. Expected something like '{kind}*.csv'."
+            )
+        paths = sorted(paths, key=lambda p: (len(os.path.basename(p)), os.path.basename(p)))
+        return paths[0]
+
+    def _merge_train_with_labels(self, round_input_dir, round_ref_dir):
+        train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+        master_ref_dir = os.path.join(self.root_dir, "input", "ref")
+        master_ref_candidates = glob.glob(os.path.join(master_ref_dir, "*.csv"))
+        ref_candidates = master_ref_candidates or glob.glob(
+            os.path.join(round_ref_dir, "*.csv")
+        )
+        if not train_candidates or not ref_candidates:
+            logger.warning("Skipping train/label merge due to missing inputs.")
+            return
+
+        train_path = self._pick_one_csv(train_candidates, "train")
+        ref_path = self._pick_one_csv(ref_candidates, "label")
+        if master_ref_candidates:
+            logger.info("Using full reference labels for train merge: %s", ref_path)
+
+        with open(train_path, newline="") as train_file:
+            train_reader = csv.DictReader(train_file)
+            train_fields = train_reader.fieldnames or []
+            if not train_fields:
+                raise SubmissionException(f"Train file is empty: {train_path}")
+
+            if "y_12m" in train_fields:
+                dst_path = os.path.join(round_input_dir, "train.csv")
+                shutil.copy2(train_path, dst_path)
+                logger.info(f"Using existing labeled train file: {dst_path}")
+                return
+
+            with open(ref_path, newline="") as ref_file:
+                ref_reader = csv.DictReader(ref_file)
+                ref_fields = ref_reader.fieldnames or []
+                if "y_12m" in ref_fields:
+                    label_col = "y_12m"
+                else:
+                    label_col = None
+                    for name in ref_fields:
+                        if "y_" in name.lower() or "label" in name.lower():
+                            label_col = name
+                            break
+                if not label_col:
+                    raise SubmissionException(
+                        f"Could not identify label column in {ref_path}"
+                    )
+
+                join_cols = []
+                for col in ("CompNo", self.rolling_period_col, "yyyy", "mm"):
+                    if col in train_fields and col in ref_fields:
+                        join_cols.append(col)
+                if not join_cols:
+                    raise SubmissionException(
+                        f"No join columns found between {train_path} and {ref_path}"
+                    )
+
+                ref_map = {}
+                for row in ref_reader:
+                    key = tuple(row.get(col) for col in join_cols)
+                    ref_map[key] = row.get(label_col)
+
+        dst_path = os.path.join(round_input_dir, "train.csv")
+        written = 0
+        skipped = 0
+        with open(train_path, newline="") as train_file, open(
+            dst_path, "w", newline=""
+        ) as out_file:
+            train_reader = csv.DictReader(train_file)
+            out_fields = list(train_reader.fieldnames or [])
+            out_fields.append(label_col)
+            writer = csv.DictWriter(out_file, fieldnames=out_fields)
+            writer.writeheader()
+            for row in train_reader:
+                key = tuple(row.get(col) for col in join_cols)
+                label_val = ref_map.get(key)
+                if label_val is None or label_val == "":
+                    skipped += 1
+                    continue
+                row[label_col] = label_val
+                writer.writerow(row)
+                written += 1
+
+        logger.info(
+            f"Wrote labeled train file: {dst_path} (rows={written}, skipped={skipped})"
+        )
+
+    def _find_first_csv(self, root_dir):
+        for dirpath, _, filenames in os.walk(root_dir):
+            for filename in filenames:
+                if filename.lower().endswith(".csv"):
+                    return os.path.join(dirpath, filename)
+        return None
+
+    def _find_submission_file(self):
+        preferred_files = ("predictions.csv", "submission.csv")
+        for name in preferred_files:
+            direct_path = os.path.join(self.output_dir, name)
+            if os.path.exists(direct_path):
+                return direct_path
+        for dirpath, _, filenames in os.walk(self.output_dir):
+            for filename in filenames:
+                if (
+                    filename.lower().endswith(".csv")
+                    and "predictions" in filename.lower()
+                ):
+                    return os.path.join(dirpath, filename)
+        for dirpath, _, filenames in os.walk(self.output_dir):
+            for filename in filenames:
+                if (
+                    filename.lower().endswith(".csv")
+                    and "submission" in filename.lower()
+                ):
+                    return os.path.join(dirpath, filename)
+        return self._find_first_csv(self.output_dir)
+
+    def _select_column(self, candidates, preferred_tokens):
+        for token in preferred_tokens:
+            for name in candidates:
+                if token in name.lower():
+                    return name
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    def _load_csv_header(self, path):
+        with open(path, newline="") as src_file:
+            reader = csv.reader(src_file)
+            return next(reader, [])
+
+    def _extract_labels_and_predictions(self, pred_path, ref_path):
+        pred_cols = self._load_csv_header(pred_path)
+        ref_cols = self._load_csv_header(ref_path)
+
+        pred_only = [col for col in pred_cols if col not in ref_cols]
+        ref_only = [col for col in ref_cols if col not in pred_cols]
+        join_cols = [col for col in pred_cols if col in ref_cols]
+
+        pred_col = "p1" if "p1" in pred_only else None
+        if pred_col is None:
+            pred_col = self._select_column(pred_only, ["pred", "score", "prob"])
+        label_col = self._select_column(ref_only, ["label", "target", "y_"])
+
+        if not join_cols and self.rolling_period_col in pred_cols:
+            join_cols = [self.rolling_period_col]
+
+        if not pred_col or not label_col or not join_cols:
+            raise SubmissionException(
+                f"Could not infer prediction/label columns for {pred_path} and {ref_path}"
+            )
+
+        ref_map = {}
+        with open(ref_path, newline="") as ref_file:
+            reader = csv.DictReader(ref_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                ref_map[key] = row.get(label_col)
+
+        y_true = []
+        y_score = []
+        with open(pred_path, newline="") as pred_file:
+            reader = csv.DictReader(pred_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                if key not in ref_map:
+                    continue
+                try:
+                    y_true_val = int(float(ref_map[key]))
+                    y_score_val = float(row.get(pred_col))
+                except (TypeError, ValueError):
+                    continue
+                y_true.append(y_true_val)
+                y_score.append(y_score_val)
+
+        return y_true, y_score
+
+    def _roc_auc_score(self, y_true, y_score):
+        n = len(y_true)
+        if n == 0:
+            return math.nan
+        pairs = sorted(zip(y_score, y_true), key=lambda x: x[0])
+        n_pos = sum(1 for _, y in pairs if y == 1)
+        n_neg = n - n_pos
+        if n_pos == 0 or n_neg == 0:
+            return math.nan
+
+        rank_sum = 0.0
+        i = 0
+        rank = 1
+        while i < n:
+            j = i
+            score = pairs[i][0]
+            while j < n and pairs[j][0] == score:
+                j += 1
+            avg_rank = (rank + (rank + (j - i) - 1)) / 2.0
+            for k in range(i, j):
+                if pairs[k][1] == 1:
+                    rank_sum += avg_rank
+            rank += j - i
+            i = j
+
+        u = rank_sum - (n_pos * (n_pos + 1)) / 2.0
+        return u / (n_pos * n_neg)
+
+    def _infer_join_cols(self, pred_cols, ref_cols):
+        preferred = ["CompNo", self.rolling_period_col, "yyyy", "mm"]
+        if all(col in pred_cols and col in ref_cols for col in preferred):
+            return preferred
+        join_cols = [col for col in pred_cols if col in ref_cols]
+        return join_cols
+
+    def _infer_label_col(self, ref_cols):
+        if "y_12m" in ref_cols:
+            return "y_12m"
+        for name in ref_cols:
+            lowered = name.lower()
+            if "y_" in lowered or "label" in lowered or "target" in lowered:
+                return name
+        return None
+
+    def _infer_pred_col(self, pred_cols):
+        if "p1" in pred_cols:
+            return "p1"
+        for name in pred_cols:
+            lowered = name.lower()
+            if "pred" in lowered or "score" in lowered or "prob" in lowered:
+                return name
+        return None
+
+    def _compute_metrics_from_predictions(self, pred_path, ref_path, evaluation_period_keys):
+        pred_cols = self._load_csv_header(pred_path)
+        ref_cols = self._load_csv_header(ref_path)
+
+        join_cols = self._infer_join_cols(pred_cols, ref_cols)
+        if not join_cols:
+            raise SubmissionException(
+                f"No join columns found between {pred_path} and {ref_path}. "
+                f"Pred cols={pred_cols} Ref cols={ref_cols}"
+            )
+
+        label_col = self._infer_label_col(ref_cols)
+        if not label_col:
+            raise SubmissionException(
+                f"Could not identify label column in {ref_path}. Ref cols={ref_cols}"
+            )
+
+        pred_col = self._infer_pred_col(pred_cols)
+        if not pred_col:
+            raise SubmissionException(
+                f"Could not identify prediction column in {pred_path}. Pred cols={pred_cols}"
+            )
+
+        ref_map = {}
+        eval_period_set = set(evaluation_period_keys)
+        period_idx = self._get_period_col_index(ref_cols, ref_path)
+        with open(ref_path, newline="") as ref_file:
+            reader = csv.DictReader(ref_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                if len(ref_cols) <= period_idx:
+                    continue
+                period_key = self._to_period_key(
+                    row.get(self.rolling_period_col), self.period_sort_strategy
+                )
+                if period_key is None or period_key not in eval_period_set:
+                    continue
+                ref_map[key] = (row.get(label_col), period_key)
+
+        yearly = {period_key: {"y_true": [], "y_score": []} for period_key in evaluation_period_keys}
+        overall_y_true = []
+        overall_y_score = []
+
+        with open(pred_path, newline="") as pred_file:
+            reader = csv.DictReader(pred_file)
+            for row in reader:
+                key = tuple(row.get(col) for col in join_cols)
+                if key not in ref_map:
+                    continue
+                label_raw, period_key = ref_map[key]
+                try:
+                    label_val = int(float(label_raw))
+                    score_val = float(row.get(pred_col))
+                except (TypeError, ValueError):
+                    continue
+                y_true = 1 if label_val == 1 else 0
+                yearly[period_key]["y_true"].append(y_true)
+                yearly[period_key]["y_score"].append(score_val)
+                overall_y_true.append(y_true)
+                overall_y_score.append(score_val)
+
+        yearly_auc = []
+        valid_aucs = []
+        for period_key in evaluation_period_keys:
+            period_label = self.period_key_to_label.get(period_key, str(period_key))
+            y_true = yearly[period_key]["y_true"]
+            y_score = yearly[period_key]["y_score"]
+            n_total = len(y_true)
+            n_pos = sum(1 for y in y_true if y == 1)
+            n_neg = n_total - n_pos
+            if n_total == 0:
+                yearly_auc.append(
+                    {
+                        "period": period_label,
+                        "year": period_label,
+                        "auc": None,
+                        "n_total": 0,
+                        "n_pos": 0,
+                        "reason": "no_matches",
+                    }
+                )
+                continue
+            if n_pos == 0 or n_neg == 0:
+                yearly_auc.append(
+                    {
+                        "period": period_label,
+                        "year": period_label,
+                        "auc": None,
+                        "n_total": n_total,
+                        "n_pos": n_pos,
+                        "reason": "zero_positive_or_negative",
+                    }
+                )
+                continue
+            auc = self._roc_auc_score(y_true, y_score)
+            yearly_auc.append(
+                {
+                    "period": period_label,
+                    "year": period_label,
+                    "auc": auc,
+                    "n_total": n_total,
+                    "n_pos": n_pos,
+                }
+            )
+            if not math.isnan(auc):
+                valid_aucs.append(auc)
+
+        mean_yearly_auc = sum(valid_aucs) / len(valid_aucs) if valid_aucs else math.nan
+        overall_auc = self._roc_auc_score(overall_y_true, overall_y_score)
+
+        return {
+            "overall_auc": overall_auc,
+            "mean_yearly_auc": mean_yearly_auc,
+            "yearly_auc": yearly_auc,
+        }
+
+    def _write_yearly_auc_csv(self, path, yearly_auc):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", newline="") as out_file:
+            writer = csv.writer(out_file)
+            writer.writerow(["period", "auc", "n_total", "n_pos", "reason"])
+            for row in yearly_auc:
+                writer.writerow(
+                    [
+                        row.get("period", row.get("year")),
+                        row.get("auc"),
+                        row.get("n_total"),
+                        row.get("n_pos"),
+                        row.get("reason"),
+                    ]
+                )
+
+    def _run_programs_once(
+        self, program_dir, ingestion_program_dir, input_data_dir=None, input_ref_dir=None
+    ):
+        loop = asyncio.new_event_loop()
+        try:
+            async def run_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await asyncio.gather(
+                        self._run_program_directory(
+                            program_dir,
+                            kind="program",
+                            input_data_dir=input_data_dir,
+                            input_ref_dir=input_ref_dir,
+                        ),
+                        self._run_program_directory(
+                            ingestion_program_dir,
+                            kind="ingestion",
+                            input_data_dir=input_data_dir,
+                            input_ref_dir=input_ref_dir,
+                        ),
+                    )
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
+
+            loop.run_until_complete(run_with_watch())
+        finally:
+            loop.close()
+
+    def _run_programs_sequential(
+        self, program_dir, ingestion_program_dir, input_data_dir=None, input_ref_dir=None
+    ):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                self._run_program_directory(
+                    ingestion_program_dir,
+                    kind="ingestion",
+                    input_data_dir=input_data_dir,
+                    input_ref_dir=input_ref_dir,
+                )
+            )
+            self._sync_predictions_to_input_res()
+
+            async def run_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await self._run_program_directory(
+                        program_dir,
+                        kind="program",
+                        input_data_dir=input_data_dir,
+                        input_ref_dir=input_ref_dir,
+                    )
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
+
+            loop.run_until_complete(run_with_watch())
+        finally:
+            loop.close()
+
+    def _sync_predictions_to_input_res(self):
+        pred_path = self._find_submission_file()
+        if not pred_path:
+            logger.warning("No predictions file found to stage in input/res.")
+            return
+        res_dir = os.path.join(self.input_dir, "res")
+        os.makedirs(res_dir, exist_ok=True)
+        dst_path = os.path.join(res_dir, "predictions.csv")
+        shutil.copy2(pred_path, dst_path)
+
+    def _finalize_run_logs(self):
+        self.watch = False
+        for kind, logs in self.logs.items():
+            if logs["end"] is not None:
+                elapsed_time = logs["end"] - logs["start"]
+            else:
+                elapsed_time = self.execution_time_limit
+            return_code = logs["returncode"]
+            if return_code is None:
+                logger.warning("No return code from Process. Killing it")
+                if kind == "ingestion":
+                    containers_to_kill = self.ingestion_container_name
+                else:
+                    containers_to_kill = self.program_container_name
+                try:
+                    client.kill(containers_to_kill)
+                    client.remove_container(containers_to_kill, force=True)
+                except docker.errors.APIError as e:
+                    logger.error(e)
+                except Exception as e:
+                    logger.error(
+                        "There was a problem killing " + str(containers_to_kill) + e
+                    )
+                    if os.environ.get("LOG_LEVEL", "info").lower() == "debug":
+                        logger.exception(e)
+            if kind == "program":
+                self.program_exit_code = return_code
+                self.program_elapsed_time = elapsed_time
+            elif kind == "ingestion":
+                self.ingestion_program_exit_code = return_code
+                self.ingestion_elapsed_time = elapsed_time
+            logger.info(f"[exited with {logs['returncode']}]")
+            for key, value in logs.items():
+                if key not in ["stdout", "stderr"]:
+                    continue
+                if value["data"]:
+                    logger.info(f"[{key}]\n{value['data']}")
+                    self._put_file(value["location"], raw_data=value["data"])
+
+            logger.info("Program finished")
+
+    def _resolve_rolling_periods(self):
+        period_keys = self._build_period_catalog()
+        if len(period_keys) <= self.rolling_window_size:
+            raise SubmissionException(
+                "Rolling window size exceeds available history for evaluation."
+            )
+
+        start_key = self._normalize_boundary_key(self.rolling_start_period, self.period_sort_strategy)
+        end_key = self._normalize_boundary_key(self.rolling_end_period, self.period_sort_strategy)
+
+        if start_key is None and self.rolling_start_year is not None:
+            start_key = self._normalize_boundary_key(self.rolling_start_year, self.period_sort_strategy)
+        if end_key is None and self.rolling_end_year is not None:
+            end_key = self._normalize_boundary_key(self.rolling_end_year, self.period_sort_strategy)
+
+        if start_key is not None and end_key is not None and start_key > end_key:
+            raise SubmissionException("Rolling start period is greater than end period.")
+
+        valid_indices = []
+        for idx, key in enumerate(period_keys):
+            if start_key is not None and key < start_key:
+                continue
+            if end_key is not None and key > end_key:
+                continue
+            valid_indices.append(idx)
+
+        if not valid_indices:
+            raise SubmissionException(
+                "No rolling periods match the configured rolling start/end bounds."
+            )
+
+        start_idx = max(valid_indices[0], self.rolling_window_size)
+        end_idx = valid_indices[-1]
+        if start_idx > end_idx:
+            raise SubmissionException(
+                "Rolling start period exceeds end period after window-size adjustment."
+            )
+
+        evaluation_keys = period_keys[start_idx:end_idx + 1]
+        logger.info(
+            "Resolved rolling periods (%s): %s",
+            len(evaluation_keys),
+            [self.period_key_to_label.get(k, str(k)) for k in evaluation_keys],
+        )
+        return evaluation_keys
+
+    def _run_static_baseline(self, ingestion_program_dir, evaluation_period_keys):
+        first_eval = self.period_key_to_label.get(evaluation_period_keys[0], str(evaluation_period_keys[0]))
+        last_eval = self.period_key_to_label.get(evaluation_period_keys[-1], str(evaluation_period_keys[-1]))
+        logger.info(
+            "Running static baseline: test periods %s -> %s",
+            first_eval,
+            last_eval,
+        )
+        round_input_dir, round_ref_dir = self._prepare_static_data(evaluation_period_keys)
+        self._log_round_input_tree(round_input_dir, first_eval)
+
+        train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+        test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
+        if train_candidates:
+            logger.info(
+                "Static train rows: %s", self._count_csv_rows(train_candidates[0])
+            )
+        if test_candidates:
+            logger.info(
+                "Static test rows: %s", self._count_csv_rows(test_candidates[0])
+            )
+
+        self.logs = {}
+        self.completed_program_counter = 0
+        self.watch = True
+        try:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self._run_program_directory(
+                        ingestion_program_dir,
+                        kind="ingestion",
+                        input_data_dir=round_input_dir,
+                        input_ref_dir=round_ref_dir,
+                    )
+                )
+            finally:
+                loop.close()
+        finally:
+            self._finalize_run_logs()
+
+        self._sync_predictions_to_input_res()
+        pred_path = self._find_submission_file()
+        if not pred_path:
+            raise SubmissionException("Static baseline produced no predictions.")
+
+        static_pred_path = os.path.join(self.output_dir, "static_predictions.csv")
+        shutil.copy2(pred_path, static_pred_path)
+        logger.info("Wrote static predictions: %s", static_pred_path)
+
+        ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
+        static_metrics = self._compute_metrics_from_predictions(
+            static_pred_path, ref_path, evaluation_period_keys
+        )
+        self._write_yearly_auc_csv(
+            os.path.join(self.output_dir, "yearly_aucs_static.csv"),
+            static_metrics["yearly_auc"],
+        )
+        return static_metrics
+
+    def _run_rolling_window(self, ingestion_program_dir, evaluation_period_keys):
+        logger.info(
+            "Running rolling window for periods: %s",
+            [self.period_key_to_label.get(k, str(k)) for k in evaluation_period_keys],
+        )
+        full_ref_path = self._find_first_csv(os.path.join(self.root_dir, "input", "ref"))
+        combined_pred_path = os.path.join(self.root_dir, "rolling_predictions.csv")
+        if os.path.exists(combined_pred_path):
+            os.remove(combined_pred_path)
+        combined_header = None
+        combined_rows = 0
+
+        for period_key in evaluation_period_keys:
+            period_label = self.period_key_to_label.get(period_key, str(period_key))
+            logger.info("Rolling round for period %s", period_label)
+            round_input_dir, round_ref_dir = self._prepare_round_data(period_key)
+            self._log_round_input_tree(round_input_dir, period_label)
+
+            train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+            test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
+            if train_candidates:
+                logger.info(
+                    "Rolling train rows (%s): %s",
+                    period_label,
+                    self._count_csv_rows(train_candidates[0]),
+                )
+            if test_candidates:
+                logger.info(
+                    "Rolling test rows (%s): %s",
+                    period_label,
+                    self._count_csv_rows(test_candidates[0]),
+                )
+
+            self.logs = {}
+            self.completed_program_counter = 0
+            self.watch = True
+            try:
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        self._run_program_directory(
+                            ingestion_program_dir,
+                            kind="ingestion",
+                            input_data_dir=round_input_dir,
+                            input_ref_dir=round_ref_dir,
+                        )
+                    )
+                finally:
+                    loop.close()
+            finally:
+                self._finalize_run_logs()
+
+            self._sync_predictions_to_input_res()
+            round_pred_path = self._find_submission_file()
+            if not round_pred_path:
+                raise SubmissionException(
+                    f"Rolling round {period_label} produced no predictions."
+                )
+
+            with open(round_pred_path, newline="") as pred_file:
+                reader = csv.reader(pred_file)
+                file_header = next(reader, None)
+                if not file_header:
+                    raise SubmissionException(
+                        f"Predictions file is empty for rolling round {period_label}."
+                    )
+                mode = "w" if combined_header is None else "a"
+                with open(combined_pred_path, mode, newline="") as out_file:
+                    writer = csv.writer(out_file)
+                    if combined_header is None:
+                        combined_header = file_header
+                        writer.writerow(combined_header)
+                    elif file_header != combined_header:
+                        raise SubmissionException(
+                            f"Predictions header mismatch in rolling round {period_label}."
+                        )
+                    for row in reader:
+                        writer.writerow(row)
+                        combined_rows += 1
+
+        if combined_header is None or combined_rows == 0:
+            raise SubmissionException("No combined predictions collected in rolling.")
+
+        rolling_pred_path = os.path.join(self.output_dir, "rolling_predictions.csv")
+        shutil.copy2(combined_pred_path, rolling_pred_path)
+        logger.info("Wrote rolling predictions: %s", rolling_pred_path)
+
+        rolling_metrics = self._compute_metrics_from_predictions(
+            rolling_pred_path, full_ref_path, evaluation_period_keys
+        )
+        self._write_yearly_auc_csv(
+            os.path.join(self.output_dir, "yearly_aucs_rolling.csv"),
+            rolling_metrics["yearly_auc"],
+        )
+        return rolling_metrics
+
+    def _run_static_and_rolling(self, program_dir, ingestion_program_dir):
+        if not os.path.exists(ingestion_program_dir):
+            raise SubmissionException(
+                "Rolling requires an ingestion program during scoring; ingestion_program is missing."
+            )
+        evaluation_period_keys = self._resolve_rolling_periods()
+        first_eval = self.period_key_to_label.get(evaluation_period_keys[0], str(evaluation_period_keys[0]))
+        last_eval = self.period_key_to_label.get(evaluation_period_keys[-1], str(evaluation_period_keys[-1]))
+        logger.info(
+            "Evaluating static + rolling: start_period=%s end_period=%s window=%s period_col=%s",
+            first_eval,
+            last_eval,
+            self.rolling_window_size,
+            self.rolling_period_col,
+        )
+
+        static_results = self._run_static_baseline(
+            ingestion_program_dir, evaluation_period_keys
+        )
+        rolling_results = self._run_rolling_window(
+            ingestion_program_dir, evaluation_period_keys
+        )
+
+        # Generate detailed results for rolling predictions
+        res_dir = os.path.join(self.input_dir, "res")
+        os.makedirs(res_dir, exist_ok=True)
+        shutil.copy2(
+            os.path.join(self.output_dir, "rolling_predictions.csv"),
+            os.path.join(res_dir, "predictions.csv"),
+        )
+        self.logs = {}
+        self.completed_program_counter = 0
+        self.watch = True
+        loop = asyncio.new_event_loop()
+        try:
+            async def run_scoring_with_watch():
+                watch_task = asyncio.create_task(self.watch_detailed_results())
+                try:
+                    await self._run_program_directory(
+                        program_dir,
+                        kind="program",
+                        input_data_dir=None,
+                        input_ref_dir=os.path.join(self.root_dir, "input", "ref"),
+                    )
+                finally:
+                    watch_task.cancel()
+                    try:
+                        await watch_task
+                    except asyncio.CancelledError:
+                        pass
+
+            loop.run_until_complete(run_scoring_with_watch())
+        finally:
+            loop.close()
+            self._finalize_run_logs()
+
+        final_scores = {
+            "config": {
+                "rolling_start_period": first_eval,
+                "rolling_end_period": last_eval,
+                "period_col": self.rolling_period_col,
+                "window_size": self.rolling_window_size,
+            },
+            "static": static_results,
+            "rolling": rolling_results,
+            "mean_yearly_auc": rolling_results.get("mean_yearly_auc"),
+            "overall_auc": rolling_results.get("overall_auc"),
+            "yearly_scores": [
+                {
+                    "year": row.get("period", row.get("year")),
+                    "scores": {},
+                    "year_auc": row.get("auc"),
+                }
+                for row in rolling_results.get("yearly_auc", [])
+            ],
+        }
+        self.combined_scores = final_scores
+
     def _put_dir(self, url, directory):
         """Zip the directory and send it to the given URL using _put_file."""
         logger.info("Putting dir %s in %s" % (directory, url))
@@ -1084,7 +2303,10 @@ class Run:
         ]
         if self.is_scoring:
             # Send along submission result so scoring_program can get access
-            bundles += [(self.prediction_result, "input/res")]
+            if self.rolling_enabled and self.submission_data:
+                bundles += [(self.submission_data, "input/res")]
+            else:
+                bundles += [(self.prediction_result, "input/res")]
 
         for url, path in bundles:
             if url is not None:
@@ -1122,19 +2344,31 @@ class Run:
         program_dir = os.path.join(self.root_dir, "program")
         ingestion_program_dir = os.path.join(self.root_dir, "ingestion_program")
 
-        logger.info("Running scoring program, and then ingestion program")
-        loop = asyncio.new_event_loop()
-        gathered_tasks = asyncio.gather(
-            self._run_program_directory(program_dir, kind="program"),
-            self._run_program_directory(ingestion_program_dir, kind="ingestion"),
-            self.watch_detailed_results(),
-            loop=loop,
-        )
-
         signal.signal(signal.SIGALRM, alarm_handler)
         signal.alarm(self.execution_time_limit)
         try:
-            loop.run_until_complete(gathered_tasks)
+            if self.is_scoring:
+                if self.rolling_enabled:
+                    self._run_static_and_rolling(program_dir, ingestion_program_dir)
+                    if self.combined_scores is not None:
+                        scores_path = os.path.join(self.output_dir, "scores.json")
+                        with open(scores_path, "w") as scores_file:
+                            json.dump(self.combined_scores, scores_file, indent=2)
+                        logger.info("Wrote combined scores.json: %s", scores_path)
+                else:
+                    logger.info("Running static scoring pipeline")
+                    self.logs = {}
+                    self.completed_program_counter = 0
+                    self.watch = True
+                    # Keep rolling behavior unchanged; only static scoring runs sequentially
+                    # so ingestion can materialize predictions before scoring consumes input/res.
+                    self._run_programs_sequential(program_dir, ingestion_program_dir)
+            else:
+                logger.info("Running scoring program, and then ingestion program")
+                self.logs = {}
+                self.completed_program_counter = 0
+                self.watch = True
+                self._run_programs_once(program_dir, ingestion_program_dir)
         except ExecutionTimeLimitExceeded:
             error_message = f"Execution Time Limit exceeded. Limit was {self.execution_time_limit} seconds"
             logger.error(error_message)
@@ -1169,46 +2403,8 @@ class Run:
             asyncio.run(self._send_data_through_socket(error_message))
             raise SubmissionException(error_message)
         finally:
-            self.watch = False
-            for kind, logs in self.logs.items():
-                if logs["end"] is not None:
-                    elapsed_time = logs["end"] - logs["start"]
-                else:
-                    elapsed_time = self.execution_time_limit
-                return_code = logs["returncode"]
-                if return_code is None:
-                    logger.warning("No return code from Process. Killing it")
-                    if kind == "ingestion":
-                        containers_to_kill = self.ingestion_container_name
-                    else:
-                        containers_to_kill = self.program_container_name
-                    try:
-                        client.kill(containers_to_kill)
-                        client.remove_container(containers_to_kill, force=True)
-                    except docker.errors.APIError as e:
-                        logger.error(e)
-                    except Exception as e:
-                        logger.error(
-                            "There was a problem killing " + str(containers_to_kill) + e
-                        )
-                        if os.environ.get("LOG_LEVEL", "info").lower() == "debug":
-                            logger.exception(e)
-                if kind == "program":
-                    self.program_exit_code = return_code
-                    self.program_elapsed_time = elapsed_time
-                elif kind == "ingestion":
-                    self.ingestion_program_exit_code = return_code
-                    self.ingestion_elapsed_time = elapsed_time
-                logger.info(f"[exited with {logs['returncode']}]")
-                for key, value in logs.items():
-                    if key not in ["stdout", "stderr"]:
-                        continue
-                    if value["data"]:
-                        logger.info(f"[{key}]\n{value['data']}")
-                        self._put_file(value["location"], raw_data=value["data"])
-
-                # set logs of this kind to None, since we handled them already
-                logger.info("Program finished")
+            if not self.is_scoring:
+                self._finalize_run_logs()
         signal.alarm(0)
 
         if self.is_scoring:
@@ -1262,7 +2458,18 @@ class Run:
             "elapsedTime": self.program_elapsed_time or self.ingestion_elapsed_time,
             "ingestionExitCode": self.ingestion_program_exit_code,
             "ingestionElapsedTime": self.ingestion_elapsed_time,
+            "jobId": self.submission_id,
+            "competitionId": self.competition_id,
+            "trainingMode": self.training_mode,
         }
+        if self.rolling_enabled:
+            prog_status["rollingWindowSize"] = self.rolling_window_size
+            prog_status["rollingStartYear"] = self.rolling_start_year
+            prog_status["rollingEndYear"] = self.rolling_end_year
+            prog_status["rollingStartPeriod"] = self.rolling_start_period
+            prog_status["rollingEndPeriod"] = self.rolling_end_period
+            prog_status["periodCol"] = self.rolling_period_col
+            prog_status["periodSortStrategy"] = self.period_sort_strategy
 
         logger.info(f"Metadata output: {prog_status}")
 

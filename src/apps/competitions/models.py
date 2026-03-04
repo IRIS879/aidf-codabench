@@ -4,6 +4,7 @@ import io
 
 import botocore.exceptions
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import models
 from django.db.models import Q
@@ -27,10 +28,16 @@ logger = logging.getLogger(__name__)
 class Competition(models.Model):
     COMPETITION = "competition"
     BENCHMARK = "benchmark"
+    TRAINING_MODE_STATIC = "static"
+    TRAINING_MODE_ROLLING = "rolling"
 
     COMPETITION_TYPE = (
         (COMPETITION, "competition"),
         (BENCHMARK, "benchmark"),
+    )
+    TRAINING_MODE_CHOICES = (
+        (TRAINING_MODE_STATIC, "Static split"),
+        (TRAINING_MODE_ROLLING, "Rolling window"),
     )
 
     title = models.CharField(max_length=256)
@@ -101,9 +108,43 @@ class Competition(models.Model):
 
     # If true, forum is enabled (default=True)
     forum_enabled = models.BooleanField(default=True)
+    training_mode = models.CharField(
+        max_length=16,
+        choices=TRAINING_MODE_CHOICES,
+        default=TRAINING_MODE_STATIC,
+    )
+    period_col = models.CharField(max_length=128, null=True, blank=True)
+    rolling_start_period = models.CharField(max_length=128, null=True, blank=True)
+    rolling_end_period = models.CharField(max_length=128, null=True, blank=True)
+    rolling_window_size = models.PositiveIntegerField(null=True, blank=True)
+    rolling_window_start_date = models.DateField(null=True, blank=True)
+    rolling_window_end_date = models.DateField(null=True, blank=True)
 
     def __str__(self):
         return f"competition-{self.title}-{self.pk}-{self.competition_type}"
+
+    def clean(self):
+        if self.training_mode == self.TRAINING_MODE_ROLLING:
+            missing_fields = []
+            if not self.period_col:
+                # Backward compatibility for pre-period_col rolling competitions.
+                self.period_col = "yyyy"
+            if not self.rolling_start_period and self.rolling_window_start_date:
+                self.rolling_start_period = self.rolling_window_start_date.isoformat()
+            if not self.rolling_end_period and self.rolling_window_end_date:
+                self.rolling_end_period = self.rolling_window_end_date.isoformat()
+            if not self.rolling_start_period:
+                missing_fields.append("rolling_start_period")
+            if not self.rolling_end_period:
+                missing_fields.append("rolling_end_period")
+            if self.rolling_window_size is None:
+                missing_fields.append("rolling_window_size")
+            if missing_fields:
+                raise ValidationError(
+                    {field: "This field is required when training_mode is rolling." for field in missing_fields}
+                )
+            if self.rolling_window_size is not None and self.rolling_window_size <= 0:
+                raise ValidationError({"rolling_window_size": "Window size must be a positive integer."})
 
     @property
     def bundle_dataset(self):

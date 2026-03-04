@@ -246,6 +246,14 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'contact_email',
             'report',
             'whitelist_emails',
+            'forum_enabled',
+            'training_mode',
+            'period_col',
+            'rolling_start_period',
+            'rolling_end_period',
+            'rolling_window_size',
+            'rolling_window_start_date',
+            'rolling_window_end_date',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',
@@ -309,6 +317,65 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             if value['type'] not in valid_question_types:
                 raise ValidationError(f"{value['type']} is not a valid question type")
         return fact_sheet
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        training_mode = attrs.get('training_mode')
+        if training_mode is None and self.instance is not None:
+            training_mode = self.instance.training_mode
+        if training_mode is None:
+            training_mode = Competition.TRAINING_MODE_STATIC
+
+        rolling_window_size = attrs.get('rolling_window_size')
+        period_col = attrs.get('period_col')
+        rolling_start_period = attrs.get('rolling_start_period')
+        rolling_end_period = attrs.get('rolling_end_period')
+        rolling_window_start_date = attrs.get('rolling_window_start_date')
+        rolling_window_end_date = attrs.get('rolling_window_end_date')
+        if self.instance is not None:
+            if period_col is None:
+                period_col = self.instance.period_col
+            if rolling_start_period is None:
+                rolling_start_period = self.instance.rolling_start_period
+            if rolling_end_period is None:
+                rolling_end_period = self.instance.rolling_end_period
+            if rolling_window_size is None:
+                rolling_window_size = self.instance.rolling_window_size
+            if rolling_window_start_date is None:
+                rolling_window_start_date = self.instance.rolling_window_start_date
+            if rolling_window_end_date is None:
+                rolling_window_end_date = self.instance.rolling_window_end_date
+
+        if training_mode == Competition.TRAINING_MODE_ROLLING:
+            if not period_col:
+                if self.instance is not None:
+                    # Backward compatibility for existing rolling competitions.
+                    attrs['period_col'] = 'yyyy'
+                    period_col = 'yyyy'
+                else:
+                    raise ValidationError({"period_col": "This field is required for rolling window mode."})
+            if not rolling_start_period and rolling_window_start_date:
+                rolling_start_period = rolling_window_start_date.isoformat()
+                attrs['rolling_start_period'] = rolling_start_period
+            if not rolling_end_period and rolling_window_end_date:
+                rolling_end_period = rolling_window_end_date.isoformat()
+                attrs['rolling_end_period'] = rolling_end_period
+            if not rolling_start_period:
+                raise ValidationError({"rolling_start_period": "This field is required for rolling window mode."})
+            if not rolling_end_period:
+                raise ValidationError({"rolling_end_period": "This field is required for rolling window mode."})
+            if rolling_window_size is None:
+                raise ValidationError({"rolling_window_size": "This field is required for rolling window mode."})
+            if rolling_window_size <= 0:
+                raise ValidationError({"rolling_window_size": "Window size must be a positive integer."})
+        else:
+            attrs['period_col'] = None
+            attrs['rolling_start_period'] = None
+            attrs['rolling_end_period'] = None
+            attrs['rolling_window_size'] = None
+            attrs['rolling_window_start_date'] = None
+            attrs['rolling_window_end_date'] = None
+        return attrs
 
     def create(self, validated_data):
         instance = super().create(validated_data)
@@ -405,6 +472,14 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'contact_email',
             'report',
             'whitelist_emails',
+            'forum_enabled',
+            'training_mode',
+            'period_col',
+            'rolling_start_period',
+            'rolling_end_period',
+            'rolling_window_size',
+            'rolling_window_start_date',
+            'rolling_window_end_date',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',

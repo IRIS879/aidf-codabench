@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import timedelta
+from datetime import timedelta, date
 from unittest import mock
 
 from django.test import TestCase
@@ -301,6 +301,49 @@ class MultipleTasksPerPhaseTests(SubmissionTestCase):
         with mock.patch('api.views.competitions.CompetitionViewSet.run_new_task_submissions') as run_new_task_submission:
             self.client.put(url, json.dumps(competition_data), content_type="application/json")
             run_new_task_submission.assert_called_once()
+
+    def test_static_competition_routes_to_static_queue(self):
+        self.comp.training_mode = 'static'
+        self.comp.save()
+        single_phase = PhaseFactory(competition=self.comp)
+        submission = self.make_submission(phase=single_phase)
+        with mock.patch('competitions.tasks.app.send_task') as celery_app:
+            with mock.patch('competitions.tasks.make_url_sassy') as mock_sassy:
+                class Task:
+                    def __init__(self):
+                        self.id = uuid.uuid4()
+
+                celery_app.return_value = Task()
+                mock_sassy.return_value = ''
+                run_submission(submission.pk)
+                assert celery_app.call_args[1]['queue'] == 'compute-worker-static'
+                assert celery_app.call_args[1]['args'][0]['training_mode'] == 'static'
+
+    def test_rolling_competition_routes_to_rolling_queue(self):
+        self.comp.training_mode = 'rolling'
+        self.comp.period_col = 'yyyy'
+        self.comp.rolling_start_period = '2018'
+        self.comp.rolling_end_period = '2019'
+        self.comp.rolling_window_size = 2
+        self.comp.rolling_window_start_date = date(2018, 1, 1)
+        self.comp.rolling_window_end_date = date(2019, 1, 1)
+        self.comp.save()
+        single_phase = PhaseFactory(competition=self.comp)
+        submission = self.make_submission(phase=single_phase)
+        with mock.patch('competitions.tasks.app.send_task') as celery_app:
+            with mock.patch('competitions.tasks.make_url_sassy') as mock_sassy:
+                class Task:
+                    def __init__(self):
+                        self.id = uuid.uuid4()
+
+                celery_app.return_value = Task()
+                mock_sassy.return_value = ''
+                run_submission(submission.pk)
+                assert celery_app.call_args[1]['queue'] == 'compute-worker-rolling'
+                assert celery_app.call_args[1]['args'][0]['training_mode'] == 'rolling'
+                assert celery_app.call_args[1]['args'][0]['period_col'] == 'yyyy'
+                assert celery_app.call_args[1]['args'][0]['rolling_start_period'] == '2018'
+                assert celery_app.call_args[1]['args'][0]['rolling_end_period'] == '2019'
 
 
 class FactSheetTests(SubmissionTestCase):

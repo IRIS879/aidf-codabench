@@ -361,6 +361,8 @@ CHANNEL_LAYERS = {
 
 SUBMISSIONS_API_URL = os.environ.get('SUBMISSIONS_API_URL', "http://django/api")
 MAX_EXECUTION_TIME_LIMIT = os.environ.get('MAX_EXECUTION_TIME_LIMIT', "600")  # time limit of the default queue
+QUEUE_STATIC = os.environ.get('QUEUE_STATIC', 'compute-worker-static')
+QUEUE_ROLLING = os.environ.get('QUEUE_ROLLING', 'compute-worker-rolling')
 
 # =============================================================================
 # Storage (Updated for Django 4.x)

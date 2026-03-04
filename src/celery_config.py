@@ -10,9 +10,12 @@ from django.conf import settings  # noqa
 
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
+queue_static = getattr(settings, 'QUEUE_STATIC', 'compute-worker-static')
+queue_rolling = getattr(settings, 'QUEUE_ROLLING', 'compute-worker-rolling')
 app.conf.task_queues = [
     # Mostly defining queue here so we can set x-max-priority
-    Queue('compute-worker', Exchange('compute-worker'), routing_key='compute-worker', queue_arguments={'x-max-priority': 10}),
+    Queue(queue_static, Exchange(queue_static), routing_key=queue_static, queue_arguments={'x-max-priority': 10}),
+    Queue(queue_rolling, Exchange(queue_rolling), routing_key=queue_rolling, queue_arguments={'x-max-priority': 10}),
 ]
 
 _vhost_apps = {}

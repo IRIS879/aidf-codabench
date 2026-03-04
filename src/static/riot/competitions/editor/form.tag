@@ -92,7 +92,22 @@ self.save = function () {
         ? CODALAB.api.update_competition
         : CODALAB.api.create_competition
 
-    self.competition_return = JSON.parse(JSON.stringify(self.competition))
+                        // to make errors clearer, move errors for "detail" page into the errors "details" key
+                        var details_section_fields = [
+                            'title',
+                            'logo',
+                            'training_mode',
+                            'period_col',
+                            'rolling_start_period',
+                            'rolling_end_period',
+                            'rolling_window_size',
+                            'rolling_window_start_date',
+                            'rolling_window_end_date'
+                        ]
+                        details_section_fields.forEach(function (field) {
+                            if (errors[field]) {
+                                // initialize section, if not already
+                                errors.details = errors.details || []
 
     // =========================
     // FIX: Ensure title exists

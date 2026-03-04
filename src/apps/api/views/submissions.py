@@ -2,6 +2,7 @@ import json
 import uuid
 
 from django.db.models import Q
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, action
@@ -108,6 +109,34 @@ class SubmissionViewSet(ModelViewSet):
             return SubmissionCreationSerializer
         else:
             return SubmissionSerializer
+
+
+    @action(detail=True, methods=['get'], permission_classes=[AllowAny], url_path='model-card/download')
+    def model_card_download(self, request, pk=None):
+        """Download model_card.json for a submission (visibility controlled by competition host)."""
+        submission = self.get_object()
+        competition = submission.phase.competition
+
+        allowed = False
+        if getattr(competition, "model_card_is_public", False):
+            allowed = True
+        if request.user.is_authenticated and competition.user_has_admin_permission(request.user):
+            allowed = True
+
+        if not allowed:
+            raise PermissionDenied("Model card is not public for this competition.")
+
+        if not getattr(submission, "model_card_json", None):
+            raise ValidationError("No model card found for this submission.")
+
+        filename = (submission.name or f"submission_{submission.pk}").strip().replace(" ", "_")
+        filename = "".join(ch for ch in filename if ch.isalnum() or ch in ("_", "-", "."))[:80] or f"submission_{submission.pk}"
+        content = json.dumps(submission.model_card_json, ensure_ascii=False, indent=2)
+
+        resp = HttpResponse(content, content_type="application/json; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}_model_card.json"'
+        return resp
+
 
     def get_queryset(self):
         # On GETs lets optimize the query to reduce DB calls

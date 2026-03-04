@@ -292,10 +292,14 @@ REST_FRAMEWORK = {
         'iso-8601',
         '%B %d, %Y',
     ),
+
+    # ============================================================
+    # FIX: Disable Browsable API (it crashes due to markdown bug)
+    # ============================================================
     'DEFAULT_RENDERER_CLASSES': (
         "rest_framework.renderers.JSONRenderer",
-        "api.renderers.CustomBrowsableAPIRenderer"),
-    # Add this line for drf-spectacular
+    ),
+
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 

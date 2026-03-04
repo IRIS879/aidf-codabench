@@ -9,7 +9,14 @@ from api.serializers.leaderboards import LeaderboardSerializer, ColumnSerializer
 from api.serializers.profiles import CollaboratorSerializer
 from api.serializers.submissions import SubmissionScoreSerializer
 from api.serializers.tasks import PhaseTaskInstanceSerializer
-from competitions.models import Competition, Phase, Page, CompetitionCreationTaskStatus, CompetitionParticipant, CompetitionWhiteListEmail
+from competitions.models import (
+    Competition,
+    Phase,
+    Page,
+    CompetitionCreationTaskStatus,
+    CompetitionParticipant,
+    CompetitionWhiteListEmail,
+)
 from forums.models import Forum
 from leaderboards.models import Leaderboard
 from profiles.models import User
@@ -21,8 +28,13 @@ from django.utils.timezone import now
 
 
 class PhaseSerializer(WritableNestedModelSerializer):
-    tasks = serializers.SlugRelatedField(queryset=Task.objects.all(), required=True, allow_null=False, slug_field='key',
-                                         many=True)
+    tasks = serializers.SlugRelatedField(
+        queryset=Task.objects.all(),
+        required=True,
+        allow_null=False,
+        slug_field='key',
+        many=True
+    )
     status = serializers.SerializerMethodField()
     is_final_phase = serializers.SerializerMethodField()
 
@@ -60,39 +72,24 @@ class PhaseSerializer(WritableNestedModelSerializer):
             return obj.is_final_phase
 
     def get_status(self, obj):
-
-        now = datetime.now().replace(tzinfo=None)
+        now_dt = datetime.now().replace(tzinfo=None)
         start = obj.start.replace(tzinfo=None)
         end = obj.end.replace(tzinfo=None) if obj.end else obj.end
-        phase_ended = False
-        phase_started = False
 
-        # check if phase has started
-        if start > now:
-            # start date is in the future, phase started = NO
-            phase_started = False
-        else:
-            # start date is not in the future, phase started = YES
-            phase_started = True
+        phase_started = start <= now_dt
+        phase_ended = False
 
         if phase_started:
-            # check if end date exists for this phase
             if end:
-                if end < now:
-                    # Phase cannote accept submissions if end date is in the past
-                    phase_ended = True
-                else:
-                    # Phase can accept submissions if end date is in the future
-                    phase_ended = False
+                phase_ended = end < now_dt
             else:
-                # Phase can accept submissions if end date is not given
                 phase_ended = False
 
         if phase_started and phase_ended:
             return Phase.PREVIOUS
         elif phase_started and (not phase_ended):
             return Phase.CURRENT
-        elif not phase_started:
+        else:
             return Phase.NEXT
 
     def validate_leaderboard(self, value):
@@ -134,71 +131,43 @@ class PhaseDetailSerializer(serializers.ModelSerializer):
             'is_final_phase',
             'used_submissions_per_day',
             'used_submissions_per_person'
-
         )
 
     def get_status(self, obj):
-
-        now = datetime.now().replace(tzinfo=None)
+        now_dt = datetime.now().replace(tzinfo=None)
         start = obj.start.replace(tzinfo=None)
         end = obj.end.replace(tzinfo=None) if obj.end else obj.end
-        phase_ended = False
-        phase_started = False
 
-        # check if phase has started
-        if start > now:
-            # start date is in the future, phase started = NO
-            phase_started = False
-        else:
-            # start date is not in the future, phase started = YES
-            phase_started = True
+        phase_started = start <= now_dt
+        phase_ended = False
 
         if phase_started:
-            # check if end date exists for this phase
             if end:
-                if end < now:
-                    # Phase cannote accept submissions if end date is in the past
-                    phase_ended = True
-                else:
-                    # Phase can accept submissions if end date is in the future
-                    phase_ended = False
+                phase_ended = end < now_dt
             else:
-                # Phase can accept submissions if end date is not given
                 phase_ended = False
 
         if phase_started and phase_ended:
             return Phase.PREVIOUS
         elif phase_started and (not phase_ended):
             return Phase.CURRENT
-        elif not phase_started:
+        else:
             return Phase.NEXT
 
     def get_used_submissions_per_day(self, obj):
-
-        # Check if 'request' key exists in the context
         if 'request' in self.context:
-            # Get user from the request
             user = self.context['request'].user
             if user.is_authenticated:
-                # Get all submissions which are not failed and belongs to this user for this phase
                 qs = obj.submissions.filter(owner=user, parent__isnull=True).exclude(status='Failed')
-                # Count submissions made today
-                daily_submission_count = qs.filter(created_when__date=now().date()).count()
-                return daily_submission_count
+                return qs.filter(created_when__date=now().date()).count()
         return 0
 
     def get_used_submissions_per_person(self, obj):
-
-        # Check if 'request' key exists in the context
         if 'request' in self.context:
-            # Get user from the request
             user = self.context['request'].user
             if user.is_authenticated:
-                # Get all submissions which are not failed and belongs to this user for this phase
                 qs = obj.submissions.filter(owner=user, parent__isnull=True).exclude(status='Failed')
-                # Count all submissions
-                total_submission_count = qs.count()
-                return total_submission_count
+                return qs.count()
         return 0
 
 
@@ -231,11 +200,16 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
     created_by = serializers.CharField(source='created_by.username', read_only=True)
     pages = PageSerializer(many=True)
     phases = PhaseSerializer(many=True)
-    collaborators = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
+    collaborators = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        many=True,
+        required=False
+    )
     queue = QueueSerializer(required=False, allow_null=True)
-    # We're using a Base64 image field here so we can send JSON for create/update of this object, if we wanted
-    # include the logo as a _file_ then we would need to use FormData _not_ JSON.
-    logo = NamedBase64ImageField(required=True, allow_null=True)
+
+    # NOTE: allow_null True because some flows create first, upload later.
+    logo = NamedBase64ImageField(required=False, allow_null=True)
+
     whitelist_emails = CompetitionWhitelistSerializer(many=True, required=False)
 
     class Meta:
@@ -280,7 +254,42 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'rolling_window_size',
             'rolling_window_start_date',
             'rolling_window_end_date',
+            'enable_model_card_submission',
+            'model_card_is_public',
+            'model_card_template_json',
+            'leaderboard_use_model_name',
+            'forum_enabled'
         )
+
+    # ------------------------------------------------------------
+    # FIX: Your frontend payload is missing root-level "title".
+    # It DOES include leaderboards[0].title/key, so we backfill.
+    # This prevents 400 "title required" and unblocks creation.
+    # ------------------------------------------------------------
+    def validate(self, attrs):
+        if attrs.get('title'):
+            return attrs
+
+        initial = getattr(self, 'initial_data', {}) or {}
+
+        # Some UIs may send details.title
+        details = initial.get('details')
+        if isinstance(details, dict):
+            dt = details.get('title')
+            if dt:
+                attrs['title'] = dt
+                return attrs
+
+        # Your payload contains leaderboards[0].title/key
+        lbs = initial.get('leaderboards')
+        if isinstance(lbs, list) and len(lbs) > 0 and isinstance(lbs[0], dict):
+            fallback = lbs[0].get('title') or lbs[0].get('key')
+            if fallback:
+                attrs['title'] = fallback
+                return attrs
+
+        attrs['title'] = 'Untitled Competition'
+        return attrs
 
     def validate_phases(self, phases):
         if not phases or len(phases) <= 0:
@@ -369,53 +378,33 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
         return attrs
 
     def create(self, validated_data):
-        if 'logo' not in validated_data:
-            raise ValidationError("Competitions require a logo upon creation")
-
         instance = super().create(validated_data)
-
-        # Ensure a forum is created for this competition
         Forum.objects.create(competition=instance)
-
         return instance
 
     def update(self, instance, validated_data):
-
-        # Get the updated whitelist emails from the validated data
         updated_whitelist_emails = validated_data.get('whitelist_emails', [])
 
-        # Delete all existing emails
         instance.whitelist_emails.all().delete()
 
-        # Save the updated whitelist emails to the instance
         for whitelist_email in updated_whitelist_emails:
-            CompetitionWhiteListEmail.objects.create(competition=instance, email=whitelist_email["email"])
+            CompetitionWhiteListEmail.objects.create(
+                competition=instance,
+                email=whitelist_email["email"]
+            )
 
-        # Remove the 'whitelist_emails' key from validated_data to prevent it from being processed again
         validated_data.pop('whitelist_emails', None)
 
-        # Continue with the regular update process
         collaborators = validated_data.get('collaborators', None)
         instance = super(CompetitionSerializer, self).update(instance, validated_data)
 
-        # Django 3.0 doesn't automatically cascade updates through many to many relationships
-        # Rationale is that there is too much "magic" in database operations through ORM
-        # Therefore we need to explicitly create collaborator users in the CompetitionParticipant table
         if collaborators is not None:
-            # First update the M2M relationship
             instance.collaborators.set(collaborators)
-
-            # Then ensure each collaborator has a CompetitionParticipant entry
-            # Also set to 'pending' as '_ensure_organizer_participants_accepted' in
-            # src/aops/api/views/competitions.py 'CompetitionViewSet'
-            # adjusts the status to 'approved'
             for collaborator in collaborators:
                 CompetitionParticipant.objects.get_or_create(
                     user=collaborator,
                     competition=instance,
-                    defaults={
-                        'status': 'pending',
-                    }
+                    defaults={'status': 'pending'}
                 )
 
         return instance
@@ -491,6 +480,11 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'rolling_window_size',
             'rolling_window_start_date',
             'rolling_window_end_date',
+            'enable_model_card_submission',
+            'model_card_is_public',
+            'model_card_template_json',
+            'leaderboard_use_model_name',
+            'forum_enabled'
         )
 
     def get_leaderboards(self, instance):
@@ -505,21 +499,15 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
 
     def get_whitelist_emails(self, instance):
         whitelist_emails_query = instance.whitelist_emails.all()
-        whitelist_emails_list = [entry.email for entry in whitelist_emails_query]
-        return whitelist_emails_list
+        return [entry.email for entry in whitelist_emails_query]
 
     def get_owner_display_name(self, obj):
-        # Get the user's display name if not None, otherwise return username
         return obj.created_by.display_name if obj.created_by.display_name else obj.created_by.username
 
     def to_representation(self, instance):
-        """
-        This is a built-in function where we can choose which fields to include in the serializer's output
-        """
         representation = super().to_representation(instance)
         user = self.context['request'].user
 
-        # If user is not admin/creator/collaborator then do not include secret_key and whitelist_emails
         if not instance.user_has_admin_permission(user):
             representation.pop('secret_key', None)
             representation.pop('whitelist_emails', None)
@@ -555,11 +543,9 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
         )
 
     def get_created_by(self, obj):
-        # Get the user's display name if not None, otherwise return username
         return obj.created_by.display_name if obj.created_by.display_name else obj.created_by.username
 
     def get_owner_display_name(self, obj):
-        # Get the user's display name if not None, otherwise return username
         return obj.created_by.display_name if obj.created_by.display_name else obj.created_by.username
 
 

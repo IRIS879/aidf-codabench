@@ -1,8 +1,12 @@
+# src/utils/data.py
+
 import os
 import uuid
 from datetime import timedelta
 
 import requests
+import boto3
+from botocore.config import Config
 from azure.storage.blob import BlobSasPermissions
 from django.conf import settings
 from django.utils.deconstruct import deconstructible
@@ -32,56 +36,94 @@ class PathWrapper(object):
                 self.path,
                 now().strftime('%Y-%m-%d-%s'),
                 truncated_uuid,
-                "{0}{1}".format(truncated_name, extension)
+                "{0}{1}".format(truncated_name, extension),
             )
         else:
-            path = os.path.join(
-                filename
-            )
+            path = os.path.join(filename)
 
         return path
 
 
-def make_url_sassy(path, permission='r', duration=60 * 60 * 24 * 5, content_type='application/zip'):
-    assert permission in ('r', 'w'), "SASSY urls only support read and write ('r' or 'w' permission)"
+def _get_sigv4_s3_client():
+    """
+    Create an S3 client that ALWAYS uses SigV4 for presigning.
+    This fixes MinIO setups that reject SigV2 presigned URLs.
+    """
+    endpoint_url = getattr(settings, "AWS_S3_ENDPOINT_URL", None) or None
+    region_name = getattr(settings, "AWS_S3_REGION_NAME", None) or "us-east-1"
 
-    client_method = None  # defined based on storage backend
+    # Use the same creds you already set for MinIO/AWS
+    access_key = getattr(settings, "AWS_ACCESS_KEY_ID", None)
+    secret_key = getattr(settings, "AWS_SECRET_ACCESS_KEY", None)
+
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region_name,
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},  # safer for MinIO + localhost:9000
+        ),
+    )
+
+
+def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type="application/zip"):
+    """
+    Generate a signed URL (read or write) for the configured storage backend.
+
+    - S3/MinIO: presigned URL using SigV4 (required for many MinIO configs)
+    - GCS: signed URL via blob.generate_signed_url
+    - Azure: SAS URL
+
+    NOTE (important):
+    - For MinIO + browser uploads, signing ContentType can break PUT due to mismatched Content-Type.
+      So we do NOT sign ContentType when AWS_S3_ENDPOINT_URL is set (custom endpoint).
+    """
+    assert permission in ("r", "w"), "SASSY urls only support read and write ('r' or 'w' permission)"
 
     if settings.STORAGE_IS_S3:
         # Remove the beginning of the URL (before bucket name) so we just have the path to the file
         path = path.split(settings.AWS_STORAGE_PRIVATE_BUCKET_NAME)[-1]
 
         # remove prepended slash
-        if path.startswith('/'):
+        if path.startswith("/"):
             path = path[1:]
 
         # Spaces replaced with +'s, so we have to replace those...
-        path = path.replace('+', ' ')
+        path = path.replace("+", " ")
 
         params = {
-            'Bucket': settings.AWS_STORAGE_PRIVATE_BUCKET_NAME,
-            'Key': path,
+            "Bucket": settings.AWS_STORAGE_PRIVATE_BUCKET_NAME,
+            "Key": path,
         }
 
         # AWS uses method instead of permission
-        if permission == 'r':
-            client_method = 'get_object'
-        elif permission == 'w':
-            client_method = 'put_object'
+        if permission == "r":
+            client_method = "get_object"
+        else:
+            client_method = "put_object"
 
-            if content_type:
-                params["ContentType"] = content_type
+        # If using a custom endpoint (MinIO), do NOT sign ContentType (common cause of 403)
+        is_custom_endpoint = bool(getattr(settings, "AWS_S3_ENDPOINT_URL", ""))
+        if content_type and not is_custom_endpoint:
+            params["ContentType"] = content_type
 
-        return BundleStorage.bucket.meta.client.generate_presigned_url(
+        # Force SigV4 for presigning (fixes MinIO rejecting SigV2 URLs)
+        s3 = _get_sigv4_s3_client()
+
+        return s3.generate_presigned_url(
             client_method,
             Params=params,
             ExpiresIn=duration,
         )
+
     elif settings.STORAGE_IS_GCS:
-        if permission == 'r':
-            client_method = 'GET'
-        elif permission == 'w':
-            client_method = 'PUT'
+        if permission == "r":
+            client_method = "GET"
+        else:
+            client_method = "PUT"
 
         bucket = BundleStorage.client.get_bucket(settings.GS_PRIVATE_BUCKET_NAME)
         return bucket.blob(path).generate_signed_url(
@@ -89,10 +131,11 @@ def make_url_sassy(path, permission='r', duration=60 * 60 * 24 * 5, content_type
             method=client_method,
             content_type=content_type,
         )
+
     elif settings.STORAGE_IS_AZURE:
-        if permission == 'r':
+        if permission == "r":
             client_method = BlobSasPermissions(read=True)
-        elif permission == 'w':
+        else:
             client_method = BlobSasPermissions(read=True, write=True)
 
         sas_token = BundleStorage.service.generate_blob_shared_access_signature(
@@ -108,20 +151,21 @@ def make_url_sassy(path, permission='r', duration=60 * 60 * 24 * 5, content_type
             sas_token=sas_token,
         )
 
+    raise RuntimeError("No supported storage backend configured (S3/GCS/AZURE).")
+
 
 def put_blob(url, file_path):
     return requests.put(
         url,
-        data=open(file_path, 'rb'),
+        data=open(file_path, "rb"),
         headers={
             # Only for Azure but AWS ignores this fine
-            'x-ms-blob-type': 'BlockBlob',
-        }
+            "x-ms-blob-type": "BlockBlob",
+        },
     )
 
 
 def pretty_bytes(bytes, decimal_places=1, suffix="B", binary=False, return_0_for_invalid=False):
-
     # Ensure bytes is a valid number
     try:
         bytes = float(bytes)
@@ -132,14 +176,14 @@ def pretty_bytes(bytes, decimal_places=1, suffix="B", binary=False, return_0_for
         return 0 if return_0_for_invalid else ""  # Return 0 or empty string for invalid inputs
 
     factor = 1024.0 if binary else 1000.0
-    units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'] if binary else ['', 'k', 'M', 'G', 'T', 'P', 'E', 'Z']
+    units = ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"] if binary else ["", "k", "M", "G", "T", "P", "E", "Z"]
 
     for unit in units:
-        if abs(bytes) < factor or unit == (units[-1] + "B"):
+        if abs(bytes) < factor:
             return f"{bytes:.{decimal_places}f} {unit}{suffix}"
         bytes /= factor
 
-    return f"{bytes:.{decimal_places}f}{units[-1]}{suffix}"
+    return f"{bytes:.{decimal_places}f} {units[-1]}{suffix}"
 
 
 def gb_to_bytes(gb, binary=False):

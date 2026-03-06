@@ -213,6 +213,7 @@ services:
           memory: 256M
 
   compute_worker_static:
+    platform: linux/amd64
     command: ["watchmedo auto-restart -p '*.py' --recursive -- celery -A compute_worker worker -l info -Q ${QUEUE_STATIC:-compute-worker-static} -n compute-worker-static@%n"]
     working_dir: /app
     build:
@@ -241,6 +242,7 @@ services:
         max-file: "5"
 
   compute_worker_rolling:
+    platform: linux/amd64
     command: ["watchmedo auto-restart -p '*.py' --recursive -- celery -A compute_worker worker -l info -Q ${QUEUE_ROLLING:-compute-worker-rolling} -n compute-worker-rolling@%n"]
     working_dir: /app
     build:

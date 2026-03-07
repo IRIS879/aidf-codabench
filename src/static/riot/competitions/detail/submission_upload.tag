@@ -2,24 +2,31 @@
     <div class="ui sixteen wide column submission-container">
 
         <div class="submission-form">
-        <div class="ui grid middle aligned">
-            <div class="twelve wide column">
-                <h1 style="margin: 0;">Submission upload</h1>
+            <div class="ui grid middle aligned">
+                <div class="twelve wide column">
+                    <h1 style="margin: 0;">Submission upload</h1>
+                </div>
+
+                <div class="four wide column right aligned">
+                    <a
+                        class="ui small button"
+                        href="/static/model-cards/model_card_template.docx"
+                        target="_blank"
+                        rel="noopener"
+                    >
+                        Download Model Card Template
+                    </a>
+                </div>
             </div>
 
-            <div class="four wide column right aligned">
-                <a
-                class="ui small button"
-                href="/static/model_cards/model_card_template.json"
-                target="_blank"
-                rel="noopener"
-                >
-                Download Model Card Template
-                </a>
+            <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">
+                This phase has ended and no longer accepts submissions!
             </div>
-        </div>
-            <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">This phase has ended and no longer accepts submissions!</div>
-            <div if="{_.get(selected_phase, 'status') === 'Next'}" class="ui yellow message">This phase hasn't started yet!</div>
+
+            <div if="{_.get(selected_phase, 'status') === 'Next'}" class="ui yellow message">
+                This phase hasn't started yet!
+            </div>
+
             <form class="ui form coda-animated {error: errors}" ref="form" enctype="multipart/form-data">
                 <div class="submission-form" ref="fact_sheet_form" if="{ opts.fact_sheet !== null}">
                     <h2>Metadata or Fact Sheet</h2>
@@ -29,11 +36,13 @@
                             <label if="{question.is_required == 'false'}" for="{ question.key }">{ question.title }:</label>
                             <input type="text" name="{ question.key }">
                         </span>
+
                         <span if="{ question.type === 'checkbox' }">
                             <label for="{ question.key }">{ question.title }:</label>
                             <input type="hidden" name="{ question.key }" value="false">
                             <input type="checkbox" name="{ question.key }" value="true">
                         </span>
+
                         <span if="{ question.type === 'selection' }">
                             <label if="{question.is_required == 'true'}" class="required-answer" for="{ question.key }">{ question.title }:</label>
                             <label if="{question.is_required == 'false'}" for="{ question.key }">{ question.title }:</label>
@@ -51,13 +60,16 @@
                         <option value="">None</option>
                         <option each="{ org in organizations }" value="{ org.id }">{ org.name }</option>
                         <option value="new_organization">+ Add New Organization</option>
-                    </select> 
+                    </select>
                 </div>
 
-                <!-- ✅ Participant-facing Model Card section -->
+                <!-- Participant-facing Model Card section -->
                 <div class="field" if="{ opts.competition && opts.competition.enable_model_card_submission }">
                     <h2>Model Card</h2>
-                    <p>Your submission <strong>must</strong> include <code>model_card.json</code> inside the zip.</p>
+                    <p>
+                        Please download the model card template, complete it, convert it to PDF,
+                        and upload the PDF together with your submission.
+                    </p>
                     <button class="ui basic button" type="button" onclick="{download_model_card_template}">
                         Download Model Card Template
                     </button>
@@ -116,23 +128,7 @@
 
         self.download_model_card_template = function (e) {
             if (e) { e.preventDefault() }
-            if (!self.opts.competition || !self.opts.competition.id) { return }
-            var url = URLS.API + "competitions/" + self.opts.competition.id + "/model-card-template/"
-            CODALAB.api.request('GET', url)
-                .done(function (data) {
-                    var jsonStr = JSON.stringify(data, null, 2)
-                    var blob = new Blob([jsonStr], { type: "application/json" })
-                    var a = document.createElement("a")
-                    a.href = window.URL.createObjectURL(blob)
-                    a.download = "model_card_template.json"
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    setTimeout(function () { window.URL.revokeObjectURL(a.href) }, 1000)
-                })
-                .fail(function () {
-                    alert("Could not download model card template.")
-                })
+            window.open("/static/model-cards/model_card_template.docx", "_blank")
         }
 
         self.errors = {}
@@ -145,7 +141,6 @@
         self.organizations = []
 
         self.on("mount", function () {
-            // Setup dropdown for org
             if (self.refs.organization_dropdown) {
                 $(self.refs.organization_dropdown).dropdown()
             }
@@ -165,7 +160,7 @@
         }
 
         // Existing handlers / submission upload logic (unchanged from your repo)
-        // ... (rest of file remains unchanged in behavior)
+        // ... keep the rest of your original upload logic below this point ...
 
         CODALAB.events.on('submission_selected', function (selected_submission) {
             self.selected_submission = selected_submission
@@ -217,8 +212,10 @@
                 .item
                     border solid 1px #efefef
                     cursor pointer
+
                     &:hover
                         background-color #f5f5f5
+
                 .item.active
                     border solid 1px #03bbbbad
 

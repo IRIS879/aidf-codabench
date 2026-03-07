@@ -554,10 +554,33 @@ class Submission(models.Model):
     fact_sheet_answers = models.JSONField(null=True, blank=True, max_length=4096)
 
     # --- Model card stored per submission ---
-    # Parsed from model_card.json inside submission zip (when competition.enable_model_card_submission is True)
-    model_card_json = models.JSONField(blank=True, null=True, default=None)
-    model_card_valid = models.BooleanField(default=False)
-    model_card_schema_version = models.CharField(max_length=50, blank=True, default="v1")
+    # Uploaded model card PDF per submission
+    model_card_file = models.FileField(
+        upload_to="submission_model_cards/",
+        null=True,
+        blank=True
+    )
+
+    MODEL_CARD_PENDING = "pending"
+    MODEL_CARD_UPLOADED = "uploaded"
+    MODEL_CARD_PARSED = "parsed"
+    MODEL_CARD_FAILED = "failed"
+
+    MODEL_CARD_STATUS_CHOICES = (
+        (MODEL_CARD_PENDING, "Pending"),
+        (MODEL_CARD_UPLOADED, "Uploaded"),
+        (MODEL_CARD_PARSED, "Parsed"),
+        (MODEL_CARD_FAILED, "Failed"),
+    )
+
+    model_card_status = models.CharField(
+        max_length=20,
+        choices=MODEL_CARD_STATUS_CHOICES,
+        default=MODEL_CARD_PENDING,
+    )
+
+    model_card_parsed_json = models.JSONField(blank=True, null=True, default=None)
+    model_card_uploaded_at = models.DateTimeField(null=True, blank=True)
 
 
     # True when submission owner deletes a submission

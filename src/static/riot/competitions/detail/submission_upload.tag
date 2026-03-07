@@ -55,7 +55,6 @@
                     </select>
                 </div>
 
-                <!-- MODEL CARD SECTION -->
                 <div class="field submission-upload-section">
                     <p>
                         Please download the template, complete it, convert it to <b>PDF</b>,
@@ -67,9 +66,7 @@
                     </button>
 
                     <div class="upload-block">
-                        <label class="upload-label">
-                            Model Card PDF
-                        </label>
+                        <label class="upload-label">Model Card PDF</label>
                         <input-file
                             name="model_card_file"
                             ref="model_card_file"
@@ -79,12 +76,9 @@
                     </div>
                 </div>
 
-                <!-- PREDICTION FILE SECTION -->
                 <div class="field submission-upload-section">
                     <div class="upload-block">
-                        <label class="upload-label">
-                            Prediction ZIP
-                        </label>
+                        <label class="upload-label">Prediction ZIP</label>
                         <input-file
                             name="data_file"
                             ref="data_file"
@@ -94,14 +88,32 @@
                     </div>
                 </div>
 
-            </form>
+                <div class="field" style="margin-top: 24px;">
+                    <button
+                        type="button"
+                        class="ui primary button"
+                        onclick="{check_form}"
+                        disabled="{is_submitting || _.get(selected_phase, 'status') !== 'Current'}">
+                        { is_submitting ? 'Submitting...' : 'Submit' }
+                    </button>
+                </div>
 
+            </form>
         </div>
 
         <div class="ui indicating progress" ref="progress">
             <div class="bar">
                 <div class="progress">{ upload_progress }%</div>
             </div>
+        </div>
+
+        <div class="ui message error" show="{ Object.keys(errors).length > 0 }">
+            <div class="header">Error(s) uploading submission</div>
+            <ul class="list">
+                <li each="{ error, field in errors }">
+                    <strong>{ field }:</strong> { error }
+                </li>
+            </ul>
         </div>
 
         <div class="ui styled fluid accordion submission-output-container">
@@ -124,7 +136,7 @@
                         <log_window
                             selected_submission="{selected_submission}"
                             selected_tab="prediction"
-                            detailed_result_url="{detailed_result_urls[selected_submission.id]}"
+                            detailed_result_url="{get_detailed_result_url()}"
                             show_graph="{opts.competition.enable_detailed_results}">
                         </log_window>
                     </div>
@@ -133,7 +145,7 @@
                         <log_window
                             selected_submission="{selected_submission}"
                             selected_tab="scoring"
-                            detailed_result_url="{detailed_result_urls[selected_submission.id]}"
+                            detailed_result_url="{get_detailed_result_url()}"
                             show_graph="{opts.competition.enable_detailed_results}">
                         </log_window>
                     </div>
@@ -152,13 +164,8 @@
     </div>
 
 <script>
-
     var self = this
-
-    self.download_model_card_template = function (e) {
-        if (e) { e.preventDefault() }
-        window.open("/static/model-cards/model_card_template.docx", "_blank")
-    }
+    self.mixin(ProgressBarMixin)
 
     self.errors = {}
     self.selected_submission = {}
@@ -168,12 +175,208 @@
     self.autoscroll_selected = false
     self.children = []
     self.organizations = []
+    self.detailed_result_urls = {}
+    self.is_submitting = false
+
+    self.download_model_card_template = function (e) {
+        if (e) { e.preventDefault() }
+        window.open("/static/model-cards/model_card_template.docx", "_blank")
+    }
 
     self.on("mount", function () {
         if (self.refs.organization_dropdown) {
             $(self.refs.organization_dropdown).dropdown()
         }
     })
+
+    self.get_detailed_result_url = function () {
+        if (!self.selected_submission || !self.selected_submission.id) {
+            return null
+        }
+        return self.detailed_result_urls[self.selected_submission.id] || null
+    }
+
+    self.clear_form = function () {
+        $(':input', self.refs.form)
+            .not(':button, :submit, :reset, :hidden')
+            .val('')
+            .removeAttr('checked')
+            .removeAttr('selected')
+
+        self.errors = {}
+        self.update()
+    }
+
+    self.collect_fact_sheet_answers = function () {
+        var answers = {}
+
+        if (!opts.fact_sheet) {
+            return answers
+        }
+
+        opts.fact_sheet.forEach(function (question) {
+            var elements = self.refs.form.querySelectorAll('[name="' + question.key + '"]')
+
+            if (!elements || !elements.length) {
+                answers[question.key] = ''
+                return
+            }
+
+            if (question.type === 'checkbox') {
+                var checked = false
+                for (var i = 0; i < elements.length; i++) {
+                    if (elements[i].type === 'checkbox' && elements[i].checked) {
+                        checked = true
+                        break
+                    }
+                }
+                answers[question.key] = checked
+                return
+            }
+
+            answers[question.key] = elements[0].value
+        })
+
+        return answers
+    }
+
+    self.check_form = function (event) {
+        if (event) {
+            event.preventDefault()
+        }
+
+        self.file_upload_progress_handler(undefined)
+        self.errors = {}
+
+        if (!self.selected_phase || self.selected_phase.status !== 'Current') {
+            toastr.warning("This phase is not accepting submissions")
+            return
+        }
+
+        var prediction_file = self.refs.data_file.refs.file_input.files[0]
+        var model_card_file = self.refs.model_card_file.refs.file_input.files[0]
+
+        if (!prediction_file) {
+            self.errors.data_file = "Please select a prediction ZIP file"
+        } else if (!prediction_file.name.toLowerCase().endsWith('.zip')) {
+            self.errors.data_file = "Prediction file must be a .zip"
+        }
+
+        if (!model_card_file) {
+            self.errors.model_card_file = "Please select a model card PDF"
+        } else if (!model_card_file.name.toLowerCase().endsWith('.pdf')) {
+            self.errors.model_card_file = "Model card file must be a .pdf"
+        }
+
+        if (opts.fact_sheet) {
+            var fact_sheet_answers = self.collect_fact_sheet_answers()
+
+            opts.fact_sheet.forEach(function (question) {
+                var value = fact_sheet_answers[question.key]
+                var isEmpty = value === '' || value === null || value === undefined
+
+                if (question.is_required === 'true' && isEmpty) {
+                    self.errors[question.key] = question.title + " is required"
+                }
+            })
+        }
+
+        if (Object.keys(self.errors).length > 0) {
+            self.update()
+            return
+        }
+
+        self.prepare_upload(self.upload)()
+    }
+
+    self.upload = function () {
+        self.is_submitting = true
+        self.update()
+
+        var prediction_file = self.refs.data_file.refs.file_input.files[0]
+        var model_card_file = self.refs.model_card_file.refs.file_input.files[0]
+
+        var timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+
+        var dataset_metadata = {
+            name: timestamp + '__' + prediction_file.name,
+            type: 'submission',
+            description: 'Competition submission file'
+        }
+
+        CODALAB.api.create_dataset(dataset_metadata, prediction_file, self.file_upload_progress_handler)
+            .done(function (dataset) {
+                var submission_metadata = {
+                    data: dataset.key,
+                    phase: self.selected_phase.id,
+                    model_card_file: model_card_file
+                }
+
+                var fact_sheet_answers = self.collect_fact_sheet_answers()
+                if (opts.fact_sheet && Object.keys(fact_sheet_answers).length > 0) {
+                    submission_metadata.fact_sheet_answers = fact_sheet_answers
+                }
+
+                if (self.refs.organization_dropdown && self.refs.organization_dropdown.value && self.refs.organization_dropdown.value !== 'new_organization') {
+                    submission_metadata.organization = self.refs.organization_dropdown.value
+                }
+
+                CODALAB.api.create_submission(submission_metadata, self.file_upload_progress_handler)
+                    .done(function (submission) {
+                        toastr.success("Submission uploaded successfully")
+                        self.selected_submission = submission
+                        CODALAB.events.trigger('new_submission_created', submission)
+                        CODALAB.events.trigger('submission_selected', submission)
+                        self.clear_form()
+                        self.update()
+                    })
+                    .fail(function (response) {
+                        if (response) {
+                            try {
+                                var errors = JSON.parse(response.responseText)
+                                Object.keys(errors).forEach(function (key) {
+                                    if (Array.isArray(errors[key])) {
+                                        errors[key] = errors[key].join('; ')
+                                    }
+                                })
+                                self.errors = errors
+                                self.update()
+                            } catch (e) {
+                                toastr.error("Submission creation failed")
+                            }
+                        } else {
+                            toastr.error("Submission creation failed")
+                        }
+                    })
+                    .always(function () {
+                        self.is_submitting = false
+                        setTimeout(self.hide_progress_bar, 500)
+                        self.update()
+                    })
+            })
+            .fail(function (response) {
+                if (response) {
+                    try {
+                        var errors = JSON.parse(response.responseText)
+                        Object.keys(errors).forEach(function (key) {
+                            if (Array.isArray(errors[key])) {
+                                errors[key] = errors[key].join('; ')
+                            }
+                        })
+                        self.errors = errors
+                        self.update()
+                    } catch (e) {
+                        toastr.error("Prediction ZIP upload failed")
+                    }
+                } else {
+                    toastr.error("Prediction ZIP upload failed")
+                }
+
+                self.is_submitting = false
+                setTimeout(self.hide_progress_bar, 500)
+                self.update()
+            })
+    }
 
     self.toggle_autoscroll = function () {
         self.autoscroll_selected = !self.autoscroll_selected
@@ -191,6 +394,12 @@
     CODALAB.events.on('submission_selected', function (selected_submission) {
         self.selected_submission = selected_submission
         self.autoscroll_output()
+        self.update()
+    })
+
+    CODALAB.events.on('phase_selected', function (selected_phase) {
+        self.selected_phase = selected_phase
+        self.update()
     })
 
     self.autoscroll_output = function () {
@@ -202,11 +411,9 @@
             output.scrollTop = output.scrollHeight
         }
     }
-
 </script>
 
 <style type="text/stylus">
-
 :scope
     display block
     width 100%
@@ -245,7 +452,6 @@
     margin-bottom .5em
 
 #submission-output
-
     .submission-tabs
         overflow-x scroll
         padding-bottom 10px
@@ -280,7 +486,6 @@ code
 .graph-container
     display block
     height 250px
-
 </style>
 
 </submission-upload>

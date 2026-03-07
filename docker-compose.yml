@@ -27,6 +27,8 @@ services:
     command: bash -c "python manage.py collectstatic --noinput && cd /app/src && watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py"
     environment:
       - DATABASE_URL=postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      - DJANGO_SETTINGS_MODULE=settings.develop
+      - PYTHONPATH=/app:/app/src:/app/src/apps
     env_file: .env
     volumes:
       - .:/app:delegated
@@ -189,7 +191,6 @@ services:
   #   Celery Service
   #-----------------------------------------------
   site_worker:
-    # This auto-reloads
     command: bash -c "watchmedo auto-restart -p '*.py' --recursive -- celery -A celery_config worker -B -Q site-worker -l info -n site-worker@%n --concurrency=2"
     working_dir: /app/src
     build:
@@ -198,6 +199,12 @@ services:
       - rabbit
       - db
     env_file: .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=settings.develop
+      - PYTHONPATH=/app:/app/src:/app/src/apps
+      - CELERY_BROKER_URL=pyamqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbit:${RABBITMQ_PORT}//
+      - BROKER_URL=pyamqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbit:${RABBITMQ_PORT}//
+      - RABBITMQ_HOST=rabbit
     volumes:
       - .:/app
     restart: unless-stopped
@@ -208,8 +215,6 @@ services:
     deploy:
       resources:
         limits:
-          # Limit memory substantially here so we see any problems that may
-          # appear on Heroku ahead of time
           memory: 256M
 
   compute_worker_static:

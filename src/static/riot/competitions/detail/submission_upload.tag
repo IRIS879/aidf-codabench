@@ -56,27 +56,6 @@
                 </div>
 
                 <div class="field submission-upload-section">
-                    <p>
-                        Please download the template, complete it, convert it to <b>PDF</b>,
-                        and upload it together with your prediction submission.
-                    </p>
-
-                    <button class="ui basic button" type="button" onclick="{download_model_card_template}">
-                        Download Model Card Template
-                    </button>
-
-                    <div class="upload-block">
-                        <label class="upload-label">Model Card PDF</label>
-                        <input-file
-                            name="model_card_file"
-                            ref="model_card_file"
-                            error="{errors.model_card_file}"
-                            accept=".pdf">
-                        </input-file>
-                    </div>
-                </div>
-
-                <div class="field submission-upload-section">
                     <div class="upload-block">
                         <label class="upload-label">Prediction ZIP</label>
                         <input-file
@@ -84,6 +63,16 @@
                             ref="data_file"
                             error="{errors.data_file}"
                             accept=".zip">
+                        </input-file>
+                    </div>
+
+                    <div class="upload-block">
+                        <label class="upload-label">Model Card PDF</label>
+                        <input-file
+                            name="model_card_file"
+                            ref="model_card_file"
+                            error="{errors.model_card_file}"
+                            accept=".pdf,application/pdf">
                         </input-file>
                     </div>
                 </div>
@@ -178,12 +167,11 @@
     self.detailed_result_urls = {}
     self.is_submitting = false
 
-    self.download_model_card_template = function (e) {
-        if (e) { e.preventDefault() }
-        window.open("/static/model-cards/model_card_template.docx", "_blank")
-    }
-
     self.on("mount", function () {
+        console.log("[submission-upload] mounted")
+        console.log("[submission-upload] opts.competition =", opts.competition)
+        console.log("[submission-upload] opts.fact_sheet =", opts.fact_sheet)
+
         if (self.refs.organization_dropdown) {
             $(self.refs.organization_dropdown).dropdown()
         }
@@ -197,11 +185,23 @@
     }
 
     self.clear_form = function () {
+        console.log("[submission-upload] clear_form")
+
         $(':input', self.refs.form)
             .not(':button, :submit, :reset, :hidden')
             .val('')
             .removeAttr('checked')
             .removeAttr('selected')
+
+        var prediction_input = self.refs.data_file && self.refs.data_file.refs ? self.refs.data_file.refs.file_input : null
+        var model_card_input = self.refs.model_card_file && self.refs.model_card_file.refs ? self.refs.model_card_file.refs.file_input : null
+
+        if (prediction_input) {
+            prediction_input.value = ''
+        }
+        if (model_card_input) {
+            model_card_input.value = ''
+        }
 
         self.errors = {}
         self.update()
@@ -211,6 +211,7 @@
         var answers = {}
 
         if (!opts.fact_sheet) {
+            console.log("[submission-upload] no fact sheet configured")
             return answers
         }
 
@@ -237,6 +238,7 @@
             answers[question.key] = elements[0].value
         })
 
+        console.log("[submission-upload] fact_sheet_answers =", answers)
         return answers
     }
 
@@ -245,16 +247,33 @@
             event.preventDefault()
         }
 
+        console.log("[submission-upload] CHECK_FORM fired")
+        console.log("[submission-upload] selected_phase =", self.selected_phase)
+
         self.file_upload_progress_handler(undefined)
         self.errors = {}
 
         if (!self.selected_phase || self.selected_phase.status !== 'Current') {
+            console.warn("[submission-upload] Phase is not current")
             toastr.warning("This phase is not accepting submissions")
             return
         }
 
-        var prediction_file = self.refs.data_file.refs.file_input.files[0]
-        var model_card_file = self.refs.model_card_file.refs.file_input.files[0]
+        var prediction_input = self.refs.data_file && self.refs.data_file.refs ? self.refs.data_file.refs.file_input : null
+        var prediction_file = prediction_input && prediction_input.files ? prediction_input.files[0] : null
+
+        var model_card_input = self.refs.model_card_file && self.refs.model_card_file.refs ? self.refs.model_card_file.refs.file_input : null
+        var model_card_file = model_card_input && model_card_input.files ? model_card_input.files[0] : null
+
+        console.log("[submission-upload] prediction_input =", prediction_input)
+        console.log("[submission-upload] prediction_file =", prediction_file)
+        console.log("[submission-upload] prediction size =", prediction_file ? prediction_file.size : null)
+        console.log("[submission-upload] prediction type =", prediction_file ? prediction_file.type : null)
+
+        console.log("[submission-upload] model_card_input =", model_card_input)
+        console.log("[submission-upload] model_card_file =", model_card_file)
+        console.log("[submission-upload] model_card size =", model_card_file ? model_card_file.size : null)
+        console.log("[submission-upload] model_card type =", model_card_file ? model_card_file.type : null)
 
         if (!prediction_file) {
             self.errors.data_file = "Please select a prediction ZIP file"
@@ -282,100 +301,220 @@
         }
 
         if (Object.keys(self.errors).length > 0) {
+            console.warn("[submission-upload] Form validation failed", self.errors)
             self.update()
             return
         }
 
-        self.prepare_upload(self.upload)()
+        console.log("[submission-upload] CHECK_FORM passed")
+        console.log("[submission-upload] phase id =", self.selected_phase && self.selected_phase.id)
+        console.log("[submission-upload] prediction filename =", prediction_file && prediction_file.name)
+        console.log("[submission-upload] model card filename =", model_card_file && model_card_file.name)
+
+        self.upload()
     }
 
     self.upload = function () {
-        self.is_submitting = true
-        self.update()
+        try {
+            console.log("[submission-upload] UPLOAD started")
 
-        var prediction_file = self.refs.data_file.refs.file_input.files[0]
-        var model_card_file = self.refs.model_card_file.refs.file_input.files[0]
+            self.is_submitting = true
+            self.update()
 
-        var timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+            var prediction_input = self.refs.data_file && self.refs.data_file.refs ? self.refs.data_file.refs.file_input : null
+            var prediction_file = prediction_input && prediction_input.files ? prediction_input.files[0] : null
 
-        var dataset_metadata = {
-            name: timestamp + '__' + prediction_file.name,
-            type: 'submission',
-            description: 'Competition submission file'
-        }
+            var model_card_input = self.refs.model_card_file && self.refs.model_card_file.refs ? self.refs.model_card_file.refs.file_input : null
+            var model_card_file = model_card_input && model_card_input.files ? model_card_input.files[0] : null
 
-        CODALAB.api.create_dataset(dataset_metadata, prediction_file, self.file_upload_progress_handler)
-            .done(function (dataset) {
-                var submission_metadata = {
-                    data: dataset.key,
-                    phase: self.selected_phase.id,
-                    model_card_file: model_card_file
-                }
+            console.log("[submission-upload] upload prediction_input =", prediction_input)
+            console.log("[submission-upload] upload prediction_file =", prediction_file)
+            console.log("[submission-upload] upload prediction size =", prediction_file ? prediction_file.size : null)
+            console.log("[submission-upload] upload prediction type =", prediction_file ? prediction_file.type : null)
 
-                var fact_sheet_answers = self.collect_fact_sheet_answers()
-                if (opts.fact_sheet && Object.keys(fact_sheet_answers).length > 0) {
-                    submission_metadata.fact_sheet_answers = fact_sheet_answers
-                }
+            console.log("[submission-upload] upload model_card_input =", model_card_input)
+            console.log("[submission-upload] upload model_card_file =", model_card_file)
+            console.log("[submission-upload] upload model_card size =", model_card_file ? model_card_file.size : null)
+            console.log("[submission-upload] upload model_card type =", model_card_file ? model_card_file.type : null)
 
-                if (self.refs.organization_dropdown && self.refs.organization_dropdown.value && self.refs.organization_dropdown.value !== 'new_organization') {
-                    submission_metadata.organization = self.refs.organization_dropdown.value
-                }
+            if (!prediction_file) {
+                console.error("[submission-upload] No prediction file found inside upload()")
+                self.errors.data_file = "Please select a prediction ZIP file"
+                self.is_submitting = false
+                self.update()
+                return
+            }
 
-                CODALAB.api.create_submission(submission_metadata, self.file_upload_progress_handler)
-                    .done(function (submission) {
-                        toastr.success("Submission uploaded successfully")
-                        self.selected_submission = submission
-                        CODALAB.events.trigger('new_submission_created', submission)
-                        CODALAB.events.trigger('submission_selected', submission)
-                        self.clear_form()
-                        self.update()
-                    })
-                    .fail(function (response) {
-                        if (response) {
-                            try {
-                                var errors = JSON.parse(response.responseText)
-                                Object.keys(errors).forEach(function (key) {
-                                    if (Array.isArray(errors[key])) {
-                                        errors[key] = errors[key].join('; ')
+            if (!model_card_file) {
+                console.error("[submission-upload] No model card file found inside upload()")
+                self.errors.model_card_file = "Please select a model card PDF"
+                self.is_submitting = false
+                self.update()
+                return
+            }
+
+            var timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+
+            var dataset_metadata = {
+                name: timestamp + '__' + prediction_file.name,
+                type: 'submission',
+                description: 'Competition submission file'
+            }
+
+            console.log("[submission-upload] calling create_dataset with metadata =", dataset_metadata)
+
+            var datasetRequest = CODALAB.api.create_dataset(
+                dataset_metadata,
+                prediction_file,
+                self.file_upload_progress_handler
+            )
+
+            console.log("[submission-upload] create_dataset returned =", datasetRequest)
+
+            datasetRequest
+                .done(function (dataset) {
+                    console.log("[submission-upload] create_dataset DONE")
+                    console.log("[submission-upload] dataset upload SUCCESS")
+                    console.log("[submission-upload] dataset.key =", dataset && dataset.key)
+                    console.log("[submission-upload] dataset =", dataset)
+
+                    var formData = new FormData()
+                    formData.append('data', dataset.key)
+                    formData.append('phase', self.selected_phase.id)
+                    formData.append('model_card_file', model_card_file)
+
+                    var fact_sheet_answers = self.collect_fact_sheet_answers()
+                    if (opts.fact_sheet && Object.keys(fact_sheet_answers).length > 0) {
+                        formData.append('fact_sheet_answers', JSON.stringify(fact_sheet_answers))
+                    }
+
+                    if (
+                        self.refs.organization_dropdown &&
+                        self.refs.organization_dropdown.value &&
+                        self.refs.organization_dropdown.value !== 'new_organization'
+                    ) {
+                        formData.append('organization', self.refs.organization_dropdown.value)
+                    }
+
+                    console.log("[submission-upload] FINAL SUBMISSION PAYLOAD")
+                    console.log("[submission-upload] phase =", self.selected_phase.id)
+                    console.log("[submission-upload] dataset key =", dataset.key)
+                    console.log("[submission-upload] model_card_file =", model_card_file ? model_card_file.name : null)
+                    console.log("[submission-upload] model_card_size =", model_card_file ? model_card_file.size : null)
+
+                    try {
+                        for (var pair of formData.entries()) {
+                            console.log("[submission-upload] formData", pair[0], pair[1])
+                        }
+                    } catch (e) {
+                        console.error("[submission-upload] Could not iterate FormData entries", e)
+                    }
+
+                    console.log("[submission-upload] calling multipart POST /api/submissions/")
+
+                    var submissionRequest = $.ajax({
+                        url: '/api/submissions/',
+                        type: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        xhr: function () {
+                            var xhr = $.ajaxSettings.xhr()
+                            if (xhr && xhr.upload) {
+                                xhr.upload.addEventListener('progress', function (evt) {
+                                    if (evt.lengthComputable) {
+                                        self.file_upload_progress_handler(evt)
                                     }
-                                })
-                                self.errors = errors
-                                self.update()
-                            } catch (e) {
-                                toastr.error("Submission creation failed")
+                                }, false)
                             }
-                        } else {
-                            toastr.error("Submission creation failed")
+                            return xhr
                         }
                     })
-                    .always(function () {
-                        self.is_submitting = false
-                        setTimeout(self.hide_progress_bar, 500)
-                        self.update()
-                    })
-            })
-            .fail(function (response) {
-                if (response) {
-                    try {
-                        var errors = JSON.parse(response.responseText)
-                        Object.keys(errors).forEach(function (key) {
-                            if (Array.isArray(errors[key])) {
-                                errors[key] = errors[key].join('; ')
+
+                    console.log("[submission-upload] create_submission returned =", submissionRequest)
+
+                    submissionRequest
+                        .done(function (submission) {
+                            console.log("[submission-upload] create_submission DONE")
+                            console.log("[submission-upload] submission =", submission)
+
+                            toastr.success("Submission uploaded successfully")
+                            self.selected_submission = submission
+                            CODALAB.events.trigger('new_submission_created', submission)
+                            CODALAB.events.trigger('submission_selected', submission)
+                            self.clear_form()
+                            self.update()
+                        })
+                        .fail(function (response) {
+                            console.error("[submission-upload] create_submission FAIL")
+                            console.error("[submission-upload] response object =", response)
+                            console.error("[submission-upload] HTTP status =", response ? response.status : null)
+                            console.error("[submission-upload] statusText =", response ? response.statusText : null)
+                            console.error("[submission-upload] raw response =", response ? response.responseText : null)
+
+                            if (response) {
+                                try {
+                                    var errors = JSON.parse(response.responseText)
+                                    Object.keys(errors).forEach(function (key) {
+                                        if (Array.isArray(errors[key])) {
+                                            errors[key] = errors[key].join('; ')
+                                        }
+                                    })
+                                    console.error("[submission-upload] parsed errors =", errors)
+                                    self.errors = errors
+                                    self.update()
+                                } catch (e) {
+                                    console.error("[submission-upload] create_submission FAIL parse error", e)
+                                    toastr.error("Submission creation failed")
+                                }
+                            } else {
+                                toastr.error("Submission creation failed")
                             }
                         })
-                        self.errors = errors
-                        self.update()
-                    } catch (e) {
+                        .always(function () {
+                            console.log("[submission-upload] create_submission ALWAYS")
+                            self.is_submitting = false
+                            setTimeout(self.hide_progress_bar, 500)
+                            self.update()
+                        })
+                })
+                .fail(function (response) {
+                    console.error("[submission-upload] create_dataset FAIL")
+                    console.error("[submission-upload] response object =", response)
+                    console.error("[submission-upload] HTTP status =", response ? response.status : null)
+                    console.error("[submission-upload] statusText =", response ? response.statusText : null)
+                    console.error("[submission-upload] raw response =", response ? response.responseText : null)
+
+                    if (response) {
+                        try {
+                            var errors = JSON.parse(response.responseText)
+                            Object.keys(errors).forEach(function (key) {
+                                if (Array.isArray(errors[key])) {
+                                    errors[key] = errors[key].join('; ')
+                                }
+                            })
+                            console.error("[submission-upload] parsed dataset errors =", errors)
+                            self.errors = errors
+                            self.update()
+                        } catch (e) {
+                            console.error("[submission-upload] create_dataset FAIL parse error", e)
+                            toastr.error("Prediction ZIP upload failed")
+                        }
+                    } else {
                         toastr.error("Prediction ZIP upload failed")
                     }
-                } else {
-                    toastr.error("Prediction ZIP upload failed")
-                }
 
-                self.is_submitting = false
-                setTimeout(self.hide_progress_bar, 500)
-                self.update()
-            })
+                    self.is_submitting = false
+                    setTimeout(self.hide_progress_bar, 500)
+                    self.update()
+                })
+        } catch (e) {
+            console.error("[submission-upload] upload crashed")
+            console.error(e)
+            self.is_submitting = false
+            self.update()
+            toastr.error("Upload crashed in browser")
+        }
     }
 
     self.toggle_autoscroll = function () {
@@ -392,12 +531,14 @@
     }
 
     CODALAB.events.on('submission_selected', function (selected_submission) {
+        console.log("[submission-upload] event submission_selected", selected_submission)
         self.selected_submission = selected_submission
         self.autoscroll_output()
         self.update()
     })
 
     CODALAB.events.on('phase_selected', function (selected_phase) {
+        console.log("[submission-upload] event phase_selected", selected_phase)
         self.selected_phase = selected_phase
         self.update()
     })

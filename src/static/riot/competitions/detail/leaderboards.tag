@@ -47,16 +47,22 @@
           </td>
 
           <td>
-            <a href="{ submission.slug_url }">
+            <a if="{ submission.slug_url }" href="{ submission.slug_url }">
               { get_model_name_ui_only(submission) }
             </a>
+            <span if="{ !submission.slug_url }">
+              { get_model_name_ui_only(submission) }
+            </span>
           </td>
 
           <td>{ pretty_date(submission.created_when) }</td>
           <td>{ submission.id }</td>
 
           <td class="center aligned">
-            { get_model_card_ui_only(submission) }
+            <a if="{ submission.model_card_url }" href="{ submission.model_card_url }" target="_blank" rel="noopener">
+              View
+            </a>
+            <span if="{ !submission.model_card_url }">—</span>
           </td>
 
           <td each="{ column in filtered_columns }">
@@ -90,14 +96,7 @@
     };
 
     self.get_model_name_ui_only = function (submission) {
-      return submission.filename || submission.name || "Model";
-    };
-
-    self.get_model_card_ui_only = function (submission) {
-      if (submission.model_card_url) {
-        return `<a href="${submission.model_card_url}" target="_blank">View</a>`;
-      }
-      return "—";
+      return submission.model_name || "Model";
     };
 
     self.on("mount", function () {
@@ -212,9 +211,8 @@
       if (!submission || !submission.scores) return "";
 
       if (Array.isArray(submission.scores)) {
-
         let score = submission.scores.find(function (s) {
-          return s.column === column.index || s.key === column.key;
+          return s.index === column.index || s.column_key === column.key;
         });
 
         return score ? score.score : "";

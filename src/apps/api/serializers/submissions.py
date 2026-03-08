@@ -27,6 +27,76 @@ def ensure_submission_leaderboard(submission):
         submission.save(update_fields=["leaderboard"])
 
 
+def extract_model_card_metadata(uploaded_file):
+    """
+    Extract model name from the visible PDF text.
+
+    Expected format in the model card:
+        Model name: <actual model name>
+
+    Returns:
+        (model_name, parsed_json)
+    """
+    if not uploaded_file:
+        return None, None
+
+    reader_cls = None
+
+    try:
+        from pypdf import PdfReader as reader_cls  # type: ignore
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader as reader_cls  # type: ignore
+        except Exception:
+            reader_cls = None
+
+    if reader_cls is None:
+        return None, None
+
+    try:
+        uploaded_file.seek(0)
+        reader = reader_cls(uploaded_file)
+
+        extracted_text = []
+        for page in reader.pages[:2]:
+            try:
+                page_text = page.extract_text() or ""
+                extracted_text.append(page_text)
+            except Exception:
+                continue
+
+        full_text = "\n".join(extracted_text)
+
+        import re
+
+        model_name = None
+        normalized_text = " ".join(full_text.split())
+
+        match = re.search(
+            r"model\s*name\s*:\s*(.+?)(?=\s+(task|output|overview|data|model|evaluation|interpretability|limitations|intended use|author)\s*:?\s|$)",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            model_name = match.group(1).strip()
+
+        parsed_json = {
+            "extracted_text_preview": full_text[:2000],
+            "model_name": model_name or "",
+        }
+
+        uploaded_file.seek(0)
+        return model_name, parsed_json
+
+    except Exception:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+        return None, None
+
+
 class SubmissionSerializer(serializers.ModelSerializer):
     scores = SubmissionScoreSerializer(many=True)
     filename = serializers.SerializerMethodField(read_only=True)
@@ -161,14 +231,26 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         if uploaded_pdf:
             sub.model_card_file.save(uploaded_pdf.name, uploaded_pdf, save=False)
 
-            uploaded_status = getattr(Submission, "MODEL_CARD_UPLOADED", "uploaded")
-            sub.model_card_status = uploaded_status
+            model_name, parsed_json = extract_model_card_metadata(uploaded_pdf)
+
+            if parsed_json:
+                sub.model_card_status = Submission.MODEL_CARD_PARSED
+                sub.model_card_parsed_json = parsed_json
+            else:
+                sub.model_card_status = Submission.MODEL_CARD_UPLOADED
+                sub.model_card_parsed_json = None
+
             sub.model_card_uploaded_at = timezone.now()
+
+            if model_name:
+                sub.name = model_name.strip()
 
             sub.save(update_fields=[
                 "model_card_file",
                 "model_card_status",
+                "model_card_parsed_json",
                 "model_card_uploaded_at",
+                "name",
             ])
 
         if sub.phase.competition.auto_run_submissions:

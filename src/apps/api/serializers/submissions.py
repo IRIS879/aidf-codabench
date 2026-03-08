@@ -18,6 +18,15 @@ from tasks.models import Task
 from queues.models import Queue
 
 
+def ensure_submission_leaderboard(submission):
+    phase = getattr(submission, "phase", None)
+    phase_leaderboard = getattr(phase, "leaderboard", None) if phase else None
+
+    if phase_leaderboard and submission.leaderboard_id != phase_leaderboard.id:
+        submission.leaderboard = phase_leaderboard
+        submission.save(update_fields=["leaderboard"])
+
+
 class SubmissionSerializer(serializers.ModelSerializer):
     scores = SubmissionScoreSerializer(many=True)
     filename = serializers.SerializerMethodField(read_only=True)
@@ -152,7 +161,6 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         if uploaded_pdf:
             sub.model_card_file.save(uploaded_pdf.name, uploaded_pdf, save=False)
 
-            # Use constant if it exists on the model, otherwise fallback to literal
             uploaded_status = getattr(Submission, "MODEL_CARD_UPLOADED", "uploaded")
             sub.model_card_status = uploaded_status
             sub.model_card_uploaded_at = timezone.now()
@@ -186,22 +194,18 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
                 elif not value and fact_sheet[key]['is_required'] == 'true' and not isinstance(value, bool):
                     raise ValidationError(f'{fact_sheet[key]["title"]}({key}) requires an answer')
 
-        # Model card submission (required PDF upload)
         if not self.instance:
             if not data.get("data"):
                 raise ValidationError("This competition requires a submission zip (data).")
 
             uploaded_pdf = self.initial_data.get("model_card_file")
             self._validate_model_card_pdf(uploaded_pdf)
-
             self._uploaded_model_card_file = uploaded_pdf
 
-        # Make sure selected tasks are part of the phase
         if attrs.get('tasks'):
             if not all(_ in attrs['phase'].tasks.all() for _ in attrs['tasks']):
                 raise ValidationError("All tasks must be part of the current phase.")
 
-        # Only on create check permissions
         if not self.instance:
             is_in_competition = data["phase"].competition.participants.filter(
                 user=self.context["request"].user,
@@ -247,7 +251,7 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
             and self.instance.parent.status is not Submission.RUNNING
         ):
             self.instance.parent.status = Submission.RUNNING
-            self.instance.parent.save()
+            self.instance.parent.save(update_fields=["status"])
 
         if validated_data.get("status") == Submission.SCORING:
             from competitions.tasks import run_submission
@@ -256,9 +260,27 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         elif validated_data.get("status") == Submission.FINISHED:
             cache.delete(f"submission-{submission.pk}-log")
 
+            # Ensure finished submission is linked to its phase leaderboard
+            ensure_submission_leaderboard(submission)
+
+            # If this is a child submission, ensure the parent is linked too
+            if submission.parent:
+                ensure_submission_leaderboard(submission.parent)
+
         resp = super().update(submission, validated_data)
+
+        # Re-assert after update in case save/update logic changed fields
+        if validated_data.get("status") == Submission.FINISHED:
+            resp.refresh_from_db()
+            ensure_submission_leaderboard(resp)
+
+            if resp.parent:
+                resp.parent.refresh_from_db()
+                ensure_submission_leaderboard(resp.parent)
+
         if submission.parent:
             submission.parent.check_child_submission_statuses()
+
         return resp
 
 

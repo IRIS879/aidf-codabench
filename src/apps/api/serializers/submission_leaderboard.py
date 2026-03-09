@@ -62,9 +62,30 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
         return 'Model'
 
     def get_model_card_url(self, obj):
-        if obj.model_card_file and obj.model_card_file.name:
+        if not (obj.model_card_file and obj.model_card_file.name):
+            return None
+
+        competition = getattr(getattr(obj, 'phase', None), 'competition', None)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        user = getattr(request, 'user', None)
+
+        # Public => everyone can see
+        if competition and getattr(competition, 'model_card_is_public', False):
             try:
                 return obj.model_card_file.url
             except Exception:
                 return None
+
+        # Private => only organizer/admin can see
+        if (
+            competition
+            and user
+            and getattr(user, 'is_authenticated', False)
+            and competition.user_has_admin_permission(user)
+        ):
+            try:
+                return obj.model_card_file.url
+            except Exception:
+                return None
+
         return None

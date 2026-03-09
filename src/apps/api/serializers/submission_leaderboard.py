@@ -3,7 +3,6 @@ from rest_framework import serializers
 from api.serializers.profiles import SimpleOrganizationSerializer
 from competitions.models import Submission
 from leaderboards.models import SubmissionScore
-from utils.data import make_url_sassy
 
 
 class SubmissionScoreSerializer(serializers.ModelSerializer):
@@ -64,5 +63,8 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
 
     def get_model_card_url(self, obj):
         if obj.model_card_file and obj.model_card_file.name:
-            return make_url_sassy(obj.model_card_file.name)
+            try:
+                return obj.model_card_file.url
+            except Exception:
+                return None
         return None

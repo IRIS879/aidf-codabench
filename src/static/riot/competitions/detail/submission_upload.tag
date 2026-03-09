@@ -8,6 +8,21 @@
                 </div>
             </div>
 
+            <div class="ui segment" style="margin-top: 16px;">
+                <div style="font-weight: 600; margin-bottom: 6px;">Model Card Template</div>
+                <div style="margin-bottom: 12px; color: rgba(0,0,0,.6);">
+                    Please use the official template to prepare your model card before uploading.
+                </div>
+                <a class="ui button"
+                   style="background:#e0e1e2; color:rgba(0,0,0,.6);"
+                   href="/static/model-cards/model_card_template.docx"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    <i class="download icon"></i>
+                    Download Model Card Template
+                </a>
+            </div>
+
             <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">
                 This phase has ended and no longer accepts submissions!
             </div>
@@ -77,15 +92,15 @@
                     </div>
                 </div>
 
-                <div class="field" style="margin-top: 24px;">
-                    <button
-                        type="button"
-                        class="ui primary button"
-                        onclick="{check_form}"
-                        disabled="{is_submitting || _.get(selected_phase, 'status') !== 'Current'}">
-                        { is_submitting ? 'Submitting...' : 'Submit' }
-                    </button>
-                </div>
+        <div class="field" style="margin-top: 24px;">
+            <button
+                type="button"
+                class="ui button"
+                onclick="{check_form}"
+                disabled="{is_submitting || _.get(selected_phase, 'status') !== 'Current'}">
+                { is_submitting ? 'Submitting...' : 'Submit' }
+            </button>
+        </div>
 
             </form>
         </div>

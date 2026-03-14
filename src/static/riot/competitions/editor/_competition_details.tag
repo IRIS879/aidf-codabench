@@ -128,6 +128,12 @@
       </div>
     </div>
 
+    <div class="field">
+      <label>Runtime Limit (seconds) <small style="font-weight:400;opacity:.7">(optional)</small></label>
+      <small>If set, this overrides phase execution time limit for both static and rolling submissions. Leave empty to use phase/default limit.</small>
+      <input type="number" min="1" ref="runtime_limit_seconds" placeholder="e.g., 900" onchange="{form_updated}">
+    </div>
+
     <!-- Docker Image -->
     <div class="field required">
       <label>Competition Docker Image</label>
@@ -440,6 +446,9 @@
       self.data.reward = self.refs.reward ? $(self.refs.reward).val() : ''
       self.data.contact_email = self.refs.contact_email ? $(self.refs.contact_email).val() : ''
       self.data.report = self.refs.report ? $(self.refs.report).val() : ''
+      self.data.runtime_limit_seconds = (self.refs.runtime_limit_seconds && self.refs.runtime_limit_seconds.value)
+        ? parseInt(self.refs.runtime_limit_seconds.value)
+        : null
 
       // rolling mode validation
       if (self.data.training_mode === 'rolling') {
@@ -607,6 +616,7 @@
       $(self.refs.reward).val(competition.reward || '')
       $(self.refs.contact_email).val(competition.contact_email || '')
       $(self.refs.report).val(competition.report || '')
+      $(self.refs.runtime_limit_seconds).val(competition.runtime_limit_seconds || '')
 
       // Fact sheet
       self.fact_sheet_questions = []

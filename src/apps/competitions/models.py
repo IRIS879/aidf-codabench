@@ -121,6 +121,7 @@ class Competition(models.Model):
     rolling_window_end_date = models.DateField(null=True, blank=True)
     static_split_column = models.CharField(max_length=128, null=True, blank=True)
     static_split_value = models.CharField(max_length=128, null=True, blank=True)
+    runtime_limit_seconds = models.PositiveIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"competition-{self.title}-{self.pk}-{self.competition_type}"

@@ -256,6 +256,7 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'rolling_window_end_date',
             'static_split_column',
             'static_split_value',
+            'runtime_limit_seconds',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',
@@ -327,6 +328,12 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             training_mode = self.instance.training_mode
         if training_mode is None:
             training_mode = Competition.TRAINING_MODE_STATIC
+
+        runtime_limit_seconds = attrs.get('runtime_limit_seconds')
+        if runtime_limit_seconds is None and self.instance is not None:
+            runtime_limit_seconds = self.instance.runtime_limit_seconds
+        if runtime_limit_seconds is not None and runtime_limit_seconds <= 0:
+            raise ValidationError({"runtime_limit_seconds": "Runtime limit must be a positive integer."})
 
         rolling_window_size = attrs.get('rolling_window_size')
         period_col = attrs.get('period_col')
@@ -502,6 +509,7 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'rolling_window_end_date',
             'static_split_column',
             'static_split_value',
+            'runtime_limit_seconds',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',

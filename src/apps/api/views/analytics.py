@@ -12,7 +12,7 @@ from rest_framework_csv import renderers as r
 from competitions.models import Competition, Submission
 from analytics.models import StorageUsageHistory, CompetitionStorageDataPoint, UserStorageDataPoint
 from api.serializers.analytics import AnalyticsSerializer
-from apps.analytics.tasks import delete_orphan_files as delete_orphan_files_async_task
+from analytics.tasks import delete_orphan_files as delete_orphan_files_async_task
 
 import os
 import datetime

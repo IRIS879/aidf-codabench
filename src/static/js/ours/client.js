@@ -118,8 +118,50 @@ CODALAB.api = {
         filters.format = "csv"
         return `${URLS.API}submissions/?${$.param(filters)}`
     },
-    create_submission: function (submission_metadata) {
-        return CODALAB.api.request('POST', URLS.API + "submissions/", submission_metadata)
+    create_submission: function (submission_metadata, progress_update_callback) {
+        var form_data = new FormData()
+
+        Object.keys(submission_metadata).forEach(function (key) {
+            var value = submission_metadata[key]
+
+            if (value === undefined || value === null || value === '') {
+                return
+            }
+
+            if (key === 'tasks' && Array.isArray(value)) {
+                value.forEach(function (taskId) {
+                    form_data.append('tasks', taskId)
+                })
+                return
+            }
+
+            if (key === 'fact_sheet_answers' && typeof value === 'object') {
+                form_data.append('fact_sheet_answers', JSON.stringify(value))
+                return
+            }
+
+            form_data.append(key, value)
+        })
+
+        return $.ajax({
+            type: 'POST',
+            url: URLS.API + "submissions/",
+            data: form_data,
+            processData: false,
+            contentType: false,
+            xhr: function () {
+                var request = new window.XMLHttpRequest()
+
+                request.upload.addEventListener("progress", function (event) {
+                    if (event.lengthComputable && progress_update_callback) {
+                        var percent_complete = (event.loaded / event.total) * 100
+                        progress_update_callback(percent_complete)
+                    }
+                }, false)
+
+                return request
+            }
+        })
     },
     get_submission_details: function (id) {
         return CODALAB.api.request('GET', `${URLS.API}submissions/${id}/get_details/`)

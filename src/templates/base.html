@@ -248,7 +248,8 @@
                 public_env_variables: {
                     MAX_EXECUTION_TIME_LIMIT:MAX_EXECUTION_TIME_LIMIT
                 }
-            }
+            },
+            page: {}
         }
 
         {# Doing this here to append functionality to user data #}
@@ -270,9 +271,9 @@
             STATIC: function (file_name) {
                 return `{{ STATIC_URL }}${file_name}`
             },
-            // Websockets
-            //WS_SUBMISSION_LISTEN: ""
-
+            PHASE_LEADERBOARD: function (phase_id) {
+                return `/api/phases/${phase_id}/get_leaderboard/`
+            },
             // Analytics
             ANALYTICS_API: function (query_parameters) {
                 return "{% url "analytics_api" %}" + `?${$.param(query_parameters)}`

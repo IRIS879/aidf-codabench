@@ -48,7 +48,6 @@
       </div>
     </div>
 
-    <!-- Model Card Visibility -->
     <div class="field">
       <label><strong>Model Card Visibility</strong></label>
 
@@ -57,8 +56,8 @@
           <div class="ui radio checkbox">
             <input
               type="radio"
-              name="model_card_visibility"
-              value="public"
+              name="model_card_is_public"
+              value="true"
               ref="model_card_visibility_public"
               onchange="{form_updated}"
             />
@@ -70,8 +69,8 @@
           <div class="ui radio checkbox">
             <input
               type="radio"
-              name="model_card_visibility"
-              value="private"
+              name="model_card_is_public"
+              value="false"
               ref="model_card_visibility_private"
               onchange="{form_updated}"
             />
@@ -85,8 +84,6 @@
       </div>
     </div>
 
-    <!-- Whitelist emails list -->
-    <!-- Emails of users who do not require admin approval to enter the competition -->
     <div class="field">
       <label>Whitelist Emails</label>
       <p>
@@ -121,12 +118,10 @@
         "200px"
       );
 
-      // Default model card visibility if not present (front-end only)
-      if (!self.data.model_card_visibility) {
-        self.data.model_card_visibility = "private";
+      if (typeof self.data.model_card_is_public === "undefined") {
+        self.data.model_card_is_public = false;
       }
 
-      // Initialize Semantic UI components (checkbox + radio)
       if ($ && $.fn && $.fn.checkbox) {
         $(".ui.checkbox", self.root).checkbox();
         $(".ui.radio.checkbox", self.root).checkbox();
@@ -136,29 +131,26 @@
         .not('[type="file"]')
         .not("button")
         .not("[readonly]")
-        .each(function (i, field) {
+        .each(function () {
           this.addEventListener("keyup", self.form_updated);
         });
     });
 
     self.form_updated = () => {
-      self.data.registration_auto_approve = $(self.refs.registration_auto_approve).prop(
-        "checked"
-      );
-      self.data.allow_robot_submissions = $(self.refs.allow_robot_submissions).prop(
-        "checked"
-      );
+      self.data.registration_auto_approve = $(self.refs.registration_auto_approve).prop("checked");
+      self.data.allow_robot_submissions = $(self.refs.allow_robot_submissions).prop("checked");
       self.data.terms = self.markdown_editor.value();
 
-      // Model card visibility (radio group)
       const selected_visibility = self.root.querySelector(
-        'input[name="model_card_visibility"]:checked'
+        'input[name="model_card_is_public"]:checked'
       );
-      self.data.model_card_visibility = selected_visibility
-        ? selected_visibility.value
-        : self.data.model_card_visibility || "private";
 
-      // Get the content of the whitelist-emails textarea and split it into an array of email addresses
+      if (selected_visibility) {
+        self.data.model_card_is_public = selected_visibility.value === "true";
+      } else if (typeof self.data.model_card_is_public === "undefined") {
+        self.data.model_card_is_public = false;
+      }
+
       let whitelist_emails_content = self.markdown_editor_whitelist.value();
       let email_addresses =
         whitelist_emails_content.trim() === ""
@@ -167,56 +159,44 @@
               .split("\n")
               .map((email) => email.trim());
 
-      // Check for problematic emails
       let problematicEmailIndexes = [];
       email_addresses.forEach((email, index) => {
         if (!self.isValidEmail(email)) {
-          // If an email is invalid, store its index
           problematicEmailIndexes.push(index);
         }
       });
 
-      // Email errors
       const errorDiv = self.root.querySelector(".error-message");
       if (problematicEmailIndexes.length > 0) {
-        // Show an error message if there are invalid emails
         errorDiv.classList.add("ui", "red", "message");
 
         const errorMessage = document.createElement("strong");
         errorMessage.textContent = "One or more email addresses are invalid";
-        errorDiv.innerHTML = ""; // Clear existing content
+        errorDiv.innerHTML = "";
         errorDiv.appendChild(errorMessage);
 
-        // Create an unordered list for error details
         const errorList = document.createElement("ul");
 
         problematicEmailIndexes.forEach((index) => {
           const problematicEmail = email_addresses[index];
-          // Create a list item for each problematic email
           const listItem = document.createElement("li");
           listItem.textContent = `${problematicEmail}`;
           errorList.appendChild(listItem);
         });
 
-        // Append the error details (unordered list) to the 'error-message' div
         errorDiv.appendChild(errorList);
       } else {
-        // Clear the error message and remove the classes if all emails are valid
         errorDiv.classList.remove("ui", "red", "message");
         errorDiv.textContent = "";
       }
 
-      // Add to whitelist_emails when there is not problematic email address
-      if (problematicEmailIndexes.length == 0) {
+      if (problematicEmailIndexes.length === 0) {
         self.data.whitelist_emails = email_addresses;
       }
 
-      // set a boolean to true if all emails are valid
-      let is_valid_emails = problematicEmailIndexes.length == 0;
+      let is_valid_emails = problematicEmailIndexes.length === 0;
       let is_valid_terms = !!self.data.terms;
-
-      // set a valid boolean to true when all email are valid and terms are valid
-      is_valid = is_valid_terms && is_valid_emails;
+      let is_valid = is_valid_terms && is_valid_emails;
 
       CODALAB.events.trigger("competition_is_valid_update", "participation", is_valid);
 
@@ -225,12 +205,8 @@
       }
     };
 
-    // Function to validate an email address
     self.isValidEmail = function (email) {
-      // Regular expression pattern to match a valid email address
       const emailPattern = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$/;
-
-      // Test the email against the pattern and return the result (boolean)
       return emailPattern.test(email);
     };
 
@@ -239,18 +215,18 @@
       self.refs.allow_robot_submissions.checked = competition.allow_robot_submissions;
       self.markdown_editor.value(competition.terms || "");
 
-      // Load model card visibility (front-end only, defaults private)
-      const visibility = competition.model_card_visibility || "private";
-      if (visibility === "public") {
+      const isPublic = !!competition.model_card_is_public;
+
+      if (isPublic) {
         self.refs.model_card_visibility_public.checked = true;
         self.refs.model_card_visibility_private.checked = false;
       } else {
         self.refs.model_card_visibility_public.checked = false;
         self.refs.model_card_visibility_private.checked = true;
       }
-      self.data.model_card_visibility = visibility;
 
-      // Set whitelist emails in the textarea
+      self.data.model_card_is_public = isPublic;
+
       self.markdown_editor_whitelist.value(
         Array.isArray(competition.whitelist_emails) &&
           competition.whitelist_emails.length > 0
@@ -258,10 +234,8 @@
           : ""
       );
 
-      // Refresh editors
       self.markdown_editor.codemirror.refresh();
 
-      // Re-init Semantic UI after DOM updates
       self.update();
       if ($ && $.fn && $.fn.checkbox) {
         $(".ui.checkbox", self.root).checkbox();

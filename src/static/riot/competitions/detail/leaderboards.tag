@@ -13,7 +13,6 @@
     <table class="ui celled table coda-animated">
       <thead>
         <tr>
-          <!-- NOTE: colspan increased from 4 -> 5 because we added Model Card column -->
           <th class="center aligned" colspan="5"></th>
           <th each="{ task in filtered_tasks }" class="center aligned" colspan="{ task.colWidth }">
             { task.name }
@@ -25,10 +24,7 @@
           <th>{ model_header }</th>
           <th>Date</th>
           <th>ID</th>
-
-          <!--  UI-only column -->
           <th>Model Card</th>
-
           <th each="{ column in filtered_columns }" colspan="1">{ column.title }</th>
         </tr>
       </thead>
@@ -50,31 +46,23 @@
             <virtual if="{ index + 1 > 5 }">{ index + 1 }</virtual>
           </td>
 
-          <!--  Model column (UI-only placeholder) -->
           <td>
-            <a href="{ submission.slug_url }">
+            <a if="{ submission.slug_url }" href="{ submission.slug_url }">
               { get_model_name_ui_only(submission) }
             </a>
-
-            <!--
-              BACKEND CONNECTION NOT SET UP:
-              We are NOT reading any real backend field like submission.model_name.
-              get_model_name_ui_only() returns placeholder UI text only.
-            -->
+            <span if="{ !submission.slug_url }">
+              { get_model_name_ui_only(submission) }
+            </span>
           </td>
 
           <td>{ pretty_date(submission.created_when) }</td>
           <td>{ submission.id }</td>
 
-          <!-- Model Card column (UI-only placeholder) -->
           <td class="center aligned">
-            { get_model_card_ui_only(submission) }
-
-            <!--
-              BACKEND CONNECTION NOT SET UP:
-              We are NOT reading any real backend field like submission.model_card_url / submission.model_card.
-              get_model_card_ui_only() returns placeholder UI text only.
-            -->
+            <a if="{ submission.model_card_url }" href="{ submission.model_card_url }" target="_blank" rel="noopener">
+              View
+            </a>
+            <span if="{ !submission.model_card_url }">—</span>
           </td>
 
           <td each="{ column in filtered_columns }">
@@ -92,95 +80,155 @@
 
   <script>
     let self = this;
-    self.selected_leaderboard = {};
+
+    self.selected_leaderboard = { submissions: [] };
     self.filtered_tasks = [];
     self.columns = [];
     self.filtered_columns = [];
     self.phase_id = null;
-    self.competition_id = null;
-    self.enable_detailed_results = false;
-    self.show_detailed_results_in_leaderboard = false;
-
-    // UI-only header text
     self.model_header = "Model";
 
     self.pretty_date = function (date_string) {
       if (!!date_string) {
         return luxon.DateTime.fromISO(date_string).toFormat("yyyy-MM-dd HH:mm");
-      } else {
-        return "";
       }
+      return "";
     };
 
-    /**
-     * UI-ONLY: placeholder model name.
-     * BACKEND NOT SET UP: do NOT replace with backend fields yet.
-     */
     self.get_model_name_ui_only = function (submission) {
-      // Option 1 (simple placeholder):
-      return "—";
-
-      // Option 2 (temporary deterministic placeholder):
-      // return submission && submission.id ? `Model-${submission.id}` : "—";
-    };
-
-    /**
-     * UI-ONLY: placeholder model card cell.
-     * BACKEND NOT SET UP: do NOT replace with backend fields yet.
-     */
-    self.get_model_card_ui_only = function (submission) {
-      // Option 1 (simple placeholder):
-      return "—";
-
-      // Option 2 (fake as "Filled" for demo):
-      // return "Filled";
-
-      // Option 3 (fake link for demo):
-      // return `<a class="ui tiny button" target="_blank" rel="noopener" href="/static/model_cards/model_card_template.json">View</a>`;
-      // NOTE: If you use Option 3, you'll need to render as HTML (Riot escapes by default),
-      // so you'd instead implement it as an <a if="{...}"> in the template.
+      return submission.model_name || "Model";
     };
 
     self.on("mount", function () {
-      this.refs.leaderboardFilter.onkeyup = function (e) {
-        self.filter_columns();
-      };
-      $("#search-leaderboard-button").click(function (e) {
+
+      if (this.refs.leaderboardFilter) {
+        this.refs.leaderboardFilter.onkeyup = function () {
+          self.filter_columns();
+        };
+      }
+
+      $("#search-leaderboard-button").off("click").on("click", function () {
         self.filter_columns();
       });
 
-      // ---------------------------------------------------
-      // BACKEND CONNECTION NOT SET UP:
-      // If later you want to inject mock UI-only data into submissions for demo,
-      // you can do it here after selected_leaderboard is populated.
-      // Right now we do NOTHING.
-      // ---------------------------------------------------
+      self.phase_id = opts.phase_id || null;
+
+      self.fetch_leaderboard();
+
+      CODALAB.events.on("phase_selected", function (selected_phase) {
+        if (!selected_phase) return;
+
+        self.phase_id = selected_phase.id;
+        self.fetch_leaderboard();
+      });
+
     });
 
+    self.fetch_leaderboard = function () {
+
+      if (!self.phase_id) return;
+
+      console.log("Fetching leaderboard for phase:", self.phase_id);
+
+      fetch(`/api/phases/${self.phase_id}/get_leaderboard/`)
+        .then(r => r.json())
+        .then(data => {
+
+          console.log("Leaderboard response:", data);
+
+          self.selected_leaderboard = data || {};
+          self.columns = [];
+
+          if (data.tasks && data.tasks.length) {
+            data.tasks.forEach(function (task) {
+              if (task.columns) {
+                task.columns.forEach(function (col) {
+                  col.task_name = task.name;
+                  self.columns.push(col);
+                });
+              }
+            });
+          }
+
+          self.filtered_columns = self.columns.slice();
+          self.rebuild_filtered_tasks();
+
+          self.update();
+        })
+        .catch(err => {
+          console.error("Leaderboard fetch failed:", err);
+        });
+
+    };
+
+    self.rebuild_filtered_tasks = function () {
+
+      let grouped = {};
+
+      self.filtered_columns.forEach(function (column) {
+
+        let taskName = column.task_name || "Main";
+
+        if (!grouped[taskName]) {
+          grouped[taskName] = {
+            name: taskName,
+            colWidth: 0
+          };
+        }
+
+        grouped[taskName].colWidth += 1;
+      });
+
+      self.filtered_tasks = Object.keys(grouped).map(function (key) {
+        return grouped[key];
+      });
+
+    };
+
     self.filter_columns = function () {
-      if (!self.selected_leaderboard || !self.selected_leaderboard.columns) return;
+
+      if (!self.columns) return;
 
       let filter = ((self.refs.leaderboardFilter && self.refs.leaderboardFilter.value) || "").toLowerCase();
+
       if (!filter) {
-        self.filtered_columns = self.columns;
+        self.filtered_columns = self.columns.slice();
+        self.rebuild_filtered_tasks();
         self.update();
         return;
       }
+
       self.filtered_columns = self.columns.filter(function (c) {
         return (c.title || "").toLowerCase().includes(filter);
       });
+
+      self.rebuild_filtered_tasks();
       self.update();
     };
 
     self.get_submission_score = function (column, submission) {
+
       if (!submission || !submission.scores) return "";
-      let score = submission.scores.find((s) => s.column === column.index);
-      return score ? score.score : "";
+
+      if (Array.isArray(submission.scores)) {
+        let score = submission.scores.find(function (s) {
+          return s.index === column.index || s.column_key === column.key;
+        });
+
+        return score ? score.score : "";
+      }
+
+      if (typeof submission.scores === "object") {
+        return submission.scores[column.key] || "";
+      }
+
+      return "";
     };
 
     self.get_detailed_result_submisison_id = function (column, submission) {
       return submission.id;
     };
+
   </script>
 
   <style type="text/stylus">

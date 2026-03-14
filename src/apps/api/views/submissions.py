@@ -26,6 +26,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def ensure_submission_leaderboard(submission):
+    phase = getattr(submission, "phase", None)
+    phase_leaderboard = getattr(phase, "leaderboard", None) if phase else None
+
+    if phase_leaderboard and submission.leaderboard_id != phase_leaderboard.id:
+        submission.leaderboard = phase_leaderboard
+        submission.save(update_fields=["leaderboard"])
+
+
 class SubmissionViewSet(ModelViewSet):
     queryset = Submission.objects.all().order_by('-pk')
     permission_classes = []
@@ -594,6 +603,13 @@ def upload_submission_scores(request, submission_pk):
     if "scores" not in request.data:
         raise ValidationError("'scores' required.")
 
+    # Ensure the scored submission is linked to the phase leaderboard
+    ensure_submission_leaderboard(submission)
+
+    # Ensure the parent is also linked if this is a child task submission
+    if submission.parent:
+        ensure_submission_leaderboard(submission.parent)
+
     competition_columns = submission.phase.leaderboard.columns.values_list('key', flat=True)
 
     for column_key, score in request.data.get("scores").items():
@@ -611,6 +627,15 @@ def upload_submission_scores(request, submission_pk):
             submission.calculate_scores()
 
     put_on_leaderboard_by_submission_rule(request, submission_pk, submission_rule)
+
+    # Re-assert leaderboard linkage after strategy logic
+    submission.refresh_from_db()
+    ensure_submission_leaderboard(submission)
+
+    if submission.parent:
+        submission.parent.refresh_from_db()
+        ensure_submission_leaderboard(submission.parent)
+
     return Response()
 
 

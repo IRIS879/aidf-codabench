@@ -49,42 +49,6 @@
     </div>
 
     <div class="field">
-      <label><strong>Model Card Visibility</strong></label>
-
-      <div class="grouped fields" style="margin-top: 8px;">
-        <div class="field">
-          <div class="ui radio checkbox">
-            <input
-              type="radio"
-              name="model_card_is_public"
-              value="true"
-              ref="model_card_visibility_public"
-              onchange="{form_updated}"
-            />
-            <label>Public – anyone can view submitted model cards</label>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="ui radio checkbox">
-            <input
-              type="radio"
-              name="model_card_is_public"
-              value="false"
-              ref="model_card_visibility_private"
-              onchange="{form_updated}"
-            />
-            <label>Private – only competition organizers can view model cards</label>
-          </div>
-        </div>
-      </div>
-
-      <div class="ui tiny grey message" style="margin-top: 8px;">
-        This is a competition-level setting. You can change it anytime.
-      </div>
-    </div>
-
-    <div class="field">
       <label>Whitelist Emails</label>
       <p>
         A list of emails (one per line) of users who do not require competition
@@ -118,13 +82,8 @@
         "200px"
       );
 
-      if (typeof self.data.model_card_is_public === "undefined") {
-        self.data.model_card_is_public = false;
-      }
-
       if ($ && $.fn && $.fn.checkbox) {
         $(".ui.checkbox", self.root).checkbox();
-        $(".ui.radio.checkbox", self.root).checkbox();
       }
 
       $(":input", self.root)
@@ -140,16 +99,6 @@
       self.data.registration_auto_approve = $(self.refs.registration_auto_approve).prop("checked");
       self.data.allow_robot_submissions = $(self.refs.allow_robot_submissions).prop("checked");
       self.data.terms = self.markdown_editor.value();
-
-      const selected_visibility = self.root.querySelector(
-        'input[name="model_card_is_public"]:checked'
-      );
-
-      if (selected_visibility) {
-        self.data.model_card_is_public = selected_visibility.value === "true";
-      } else if (typeof self.data.model_card_is_public === "undefined") {
-        self.data.model_card_is_public = false;
-      }
 
       let whitelist_emails_content = self.markdown_editor_whitelist.value();
       let email_addresses =
@@ -215,18 +164,6 @@
       self.refs.allow_robot_submissions.checked = competition.allow_robot_submissions;
       self.markdown_editor.value(competition.terms || "");
 
-      const isPublic = !!competition.model_card_is_public;
-
-      if (isPublic) {
-        self.refs.model_card_visibility_public.checked = true;
-        self.refs.model_card_visibility_private.checked = false;
-      } else {
-        self.refs.model_card_visibility_public.checked = false;
-        self.refs.model_card_visibility_private.checked = true;
-      }
-
-      self.data.model_card_is_public = isPublic;
-
       self.markdown_editor_whitelist.value(
         Array.isArray(competition.whitelist_emails) &&
           competition.whitelist_emails.length > 0
@@ -239,7 +176,6 @@
       self.update();
       if ($ && $.fn && $.fn.checkbox) {
         $(".ui.checkbox", self.root).checkbox();
-        $(".ui.radio.checkbox", self.root).checkbox();
       }
 
       self.form_updated();

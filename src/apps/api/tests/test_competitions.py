@@ -122,6 +122,33 @@ class CompetitionTests(APITestCase):
         assert self.comp.rolling_window_size is None
         assert self.comp.rolling_window_start_date is None
         assert self.comp.rolling_window_end_date is None
+        assert self.comp.static_split_column is None
+        assert self.comp.static_split_value is None
+
+    def test_static_mode_accepts_static_split_fields(self):
+        self.client.login(username='creator', password='creator')
+        url = reverse('competition-detail', kwargs={"pk": self.comp.pk})
+        data = self._prepare_competition_data(url)
+        data["training_mode"] = "static"
+        data["static_split_column"] = "yyyy"
+        data["static_split_value"] = "2022"
+        resp = self.client.put(url, data=json.dumps(data), content_type="application/json")
+        assert resp.status_code == 200
+        self.comp.refresh_from_db()
+        assert self.comp.static_split_column == "yyyy"
+        assert self.comp.static_split_value == "2022"
+
+    def test_static_mode_requires_complete_split_pair(self):
+        self.client.login(username='creator', password='creator')
+        url = reverse('competition-detail', kwargs={"pk": self.comp.pk})
+        data = self._prepare_competition_data(url)
+        data["training_mode"] = "static"
+        data["static_split_column"] = "yyyy"
+        data["static_split_value"] = None
+        resp = self.client.put(url, data=json.dumps(data), content_type="application/json")
+        assert resp.status_code == 400
+        assert "static_split_column" in resp.data
+        assert "static_split_value" in resp.data
 
 
 class PhaseMigrationTests(APITestCase):

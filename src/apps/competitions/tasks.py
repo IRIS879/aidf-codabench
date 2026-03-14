@@ -59,6 +59,8 @@ COMPETITION_FIELDS = [
     "rolling_window_size",
     "rolling_window_start_date",
     "rolling_window_end_date",
+    "static_split_column",
+    "static_split_value",
 ]
 
 TASK_FIELDS = [
@@ -174,6 +176,9 @@ def _send_to_compute_worker(submission, is_scoring):
         run_args["rolling_end_year"] = (
             competition.rolling_window_end_date.year if competition.rolling_window_end_date else None
         )
+    else:
+        run_args["static_split_column"] = competition.static_split_column
+        run_args["static_split_value"] = competition.static_split_value
     worker_queue = _compute_queue_for_submission(submission)
 
     if not submission.detailed_result.name and competition.enable_detailed_results:

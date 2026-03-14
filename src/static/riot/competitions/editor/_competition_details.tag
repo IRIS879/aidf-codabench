@@ -62,18 +62,33 @@
       <input type="text" ref="period_col" placeholder="yyyy" onchange="{form_updated}">
     </div>
 
+    <div class="field" show="{ is_static_mode() }">
+      <label>Static split column</label>
+      <small>Column used to split static training/test data (for example yyyy, year, month, or period).</small>
+      <input type="text" ref="static_split_column" placeholder="yyyy" onchange="{form_updated}">
+    </div>
+
+    <div class="field" show="{ is_static_mode() }">
+      <label>Static split value</label>
+      <small>Split point: rows before this value go to train, rows at/after this value go to test.</small>
+      <input type="text" ref="static_split_value" placeholder="e.g., 2022 or 2024-01" onchange="{form_updated}">
+    </div>
+
     <div class="field" show="{ is_rolling_mode() }">
       <label>Rolling Window Size</label>
+      <small>Number of previous periods used as training history for each rolling round (must be at least 1).</small>
       <input type="number" min="1" ref="rolling_window_size" onchange="{form_updated}">
     </div>
 
     <div class="field" show="{ is_rolling_mode() }">
       <label>Start period</label>
+      <small>First period to evaluate (inclusive). If there is not enough prior history for the selected window size, evaluation starts at the next valid period.</small>
       <input type="text" ref="rolling_start_period" placeholder="e.g., 2020 or 2024-01" onchange="{form_updated}">
     </div>
 
     <div class="field" show="{ is_rolling_mode() }">
       <label>End period</label>
+      <small>Last period to evaluate (inclusive). Must be greater than or equal to Start period.</small>
       <input type="text" ref="rolling_end_period" placeholder="e.g., 2025 or 2024-12" onchange="{form_updated}">
     </div>
 
@@ -351,6 +366,10 @@
       return (($(self.refs.training_mode).dropdown('get value') || self.data.training_mode || 'static') === 'rolling')
     }
 
+    self.is_static_mode = function () {
+      return !self.is_rolling_mode()
+    }
+
     self.form_updated = function () {
       var is_valid = true
 
@@ -388,6 +407,8 @@
         self.data.rolling_window_size = (self.refs.rolling_window_size && self.refs.rolling_window_size.value)
           ? parseInt(self.refs.rolling_window_size.value)
           : null
+        self.data.static_split_column = null
+        self.data.static_split_value = null
 
         if (!self.data.period_col || !self.data.rolling_start_period || !self.data.rolling_end_period || !self.data.rolling_window_size) {
           is_valid = false
@@ -399,6 +420,11 @@
         self.data.rolling_window_size = null
         self.data.rolling_window_start_date = null
         self.data.rolling_window_end_date = null
+        self.data.static_split_column = self.refs.static_split_column ? (self.refs.static_split_column.value || '').trim() : ''
+        self.data.static_split_value = self.refs.static_split_value ? (self.refs.static_split_value.value || '').trim() : ''
+        if (!self.data.static_split_column || !self.data.static_split_value) {
+          is_valid = false
+        }
       }
 
       if (self.data.fact_sheet === false) {
@@ -526,6 +552,8 @@
       $(self.refs.rolling_start_period).val(competition.rolling_start_period || competition.rolling_window_start_date || '')
       $(self.refs.rolling_end_period).val(competition.rolling_end_period || competition.rolling_window_end_date || '')
       $(self.refs.rolling_window_size).val(competition.rolling_window_size)
+      $(self.refs.static_split_column).val(competition.static_split_column || '')
+      $(self.refs.static_split_value).val(competition.static_split_value || '')
 
       $(self.refs.docker_image).val(competition.docker_image || '')
       $(self.refs.reward).val(competition.reward || '')

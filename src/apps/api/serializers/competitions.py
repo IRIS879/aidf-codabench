@@ -254,6 +254,8 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'rolling_window_size',
             'rolling_window_start_date',
             'rolling_window_end_date',
+            'static_split_column',
+            'static_split_value',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',
@@ -332,6 +334,8 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
         rolling_end_period = attrs.get('rolling_end_period')
         rolling_window_start_date = attrs.get('rolling_window_start_date')
         rolling_window_end_date = attrs.get('rolling_window_end_date')
+        static_split_column = attrs.get('static_split_column')
+        static_split_value = attrs.get('static_split_value')
         if self.instance is not None:
             if period_col is None:
                 period_col = self.instance.period_col
@@ -345,6 +349,10 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
                 rolling_window_start_date = self.instance.rolling_window_start_date
             if rolling_window_end_date is None:
                 rolling_window_end_date = self.instance.rolling_window_end_date
+            if static_split_column is None:
+                static_split_column = self.instance.static_split_column
+            if static_split_value is None:
+                static_split_value = self.instance.static_split_value
 
         if training_mode == Competition.TRAINING_MODE_ROLLING:
             if not period_col:
@@ -375,6 +383,18 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             attrs['rolling_window_size'] = None
             attrs['rolling_window_start_date'] = None
             attrs['rolling_window_end_date'] = None
+            has_static_col = bool((static_split_column or '').strip())
+            has_static_val = bool((static_split_value or '').strip())
+            if has_static_col ^ has_static_val:
+                raise ValidationError(
+                    {
+                        "static_split_column": "Provide both static split column and split value, or leave both empty.",
+                        "static_split_value": "Provide both static split column and split value, or leave both empty.",
+                    }
+                )
+        if training_mode == Competition.TRAINING_MODE_ROLLING:
+            attrs['static_split_column'] = None
+            attrs['static_split_value'] = None
         return attrs
 
     def create(self, validated_data):
@@ -480,6 +500,8 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'rolling_window_size',
             'rolling_window_start_date',
             'rolling_window_end_date',
+            'static_split_column',
+            'static_split_value',
             'enable_model_card_submission',
             'model_card_is_public',
             'model_card_template_json',

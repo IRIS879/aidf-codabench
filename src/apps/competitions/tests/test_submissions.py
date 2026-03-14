@@ -304,6 +304,8 @@ class MultipleTasksPerPhaseTests(SubmissionTestCase):
 
     def test_static_competition_routes_to_static_queue(self):
         self.comp.training_mode = 'static'
+        self.comp.static_split_column = 'yyyy'
+        self.comp.static_split_value = '2022'
         self.comp.save()
         single_phase = PhaseFactory(competition=self.comp)
         submission = self.make_submission(phase=single_phase)
@@ -318,6 +320,8 @@ class MultipleTasksPerPhaseTests(SubmissionTestCase):
                 run_submission(submission.pk)
                 assert celery_app.call_args[1]['queue'] == 'compute-worker-static'
                 assert celery_app.call_args[1]['args'][0]['training_mode'] == 'static'
+                assert celery_app.call_args[1]['args'][0]['static_split_column'] == 'yyyy'
+                assert celery_app.call_args[1]['args'][0]['static_split_value'] == '2022'
 
     def test_rolling_competition_routes_to_rolling_queue(self):
         self.comp.training_mode = 'rolling'

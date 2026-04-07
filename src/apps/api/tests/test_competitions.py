@@ -124,6 +124,7 @@ class CompetitionTests(APITestCase):
         assert self.comp.rolling_window_end_date is None
 
 
+
 class PhaseMigrationTests(APITestCase):
     def setUp(self):
         self.creator = UserFactory(username='creator', password='creator')

@@ -327,9 +327,9 @@ class CompetitionViewSet(ModelViewSet):
                     leaderboard = LeaderboardSerializer(leaderboard_instance, data=data['leaderboards'][0])
                 else:
                     leaderboard = LeaderboardSerializer(data=data['leaderboards'][0])
-                leaderboard.is_valid()
+                leaderboard.is_valid(raise_exception=True)
                 leaderboard.save()
-                leaderboard_id = leaderboard["id"].value
+                leaderboard_id = leaderboard.instance.id
 
                 for phase in data['phases']:
                     # Newly added phase from front-end has no id
@@ -351,9 +351,23 @@ class CompetitionViewSet(ModelViewSet):
                         )
                         # Get phase id
                         new_phase_id = new_phase_obj.id
-                        # loop over phase tasks to add phase id in each task
-                        for task in phase["tasks"]:
-                            task['phase'] = new_phase_id
+                        # Normalize new phase task payloads into task keys expected by serializer.
+                        normalized_tasks = []
+                        for task_item in phase.get("tasks", []):
+                            if isinstance(task_item, dict):
+                                task_key = (
+                                    task_item.get("key")
+                                    or task_item.get("value")
+                                    or task_item.get("task")
+                                )
+                                if not task_key:
+                                    raise ValidationError({
+                                        "tasks": f"Invalid task format received: {task_item}"
+                                    })
+                                normalized_tasks.append(task_key)
+                            else:
+                                normalized_tasks.append(task_item)
+                        phase["tasks"] = normalized_tasks
 
                     phase['leaderboard'] = leaderboard_id
 
@@ -371,7 +385,7 @@ class CompetitionViewSet(ModelViewSet):
                         phase['starting_kit'] = None
 
             # Get whitelist emails from data
-            whitelist_emails = data['whitelist_emails']
+            whitelist_emails = data.get('whitelist_emails', [])
             # Delete white_list emails from data because it is not in a list of dict format, it is just list of emails
             data.pop('whitelist_emails', None)
             # Loop over whitelist emails and add them back to whitelist emails in dict format

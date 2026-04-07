@@ -186,11 +186,11 @@ class PhaseTaskInstanceSerializer(serializers.HyperlinkedModelSerializer):
     task = serializers.SlugRelatedField(queryset=Task.objects.all(), required=True, allow_null=False, slug_field='key',
                                         many=False)
     phase = serializers.PrimaryKeyRelatedField(many=False, queryset=Phase.objects.all())
-    id = serializers.IntegerField(source='task.id', required=False)
-    value = serializers.CharField(source='task.key', required=False)
-    key = serializers.CharField(source='task.key', required=False)
-    created_when = serializers.DateTimeField(source='task.created_when', required=False)
-    name = serializers.CharField(source='task.name', required=False)
+    id = serializers.IntegerField(source='task.id', required=False, read_only=True)
+    value = serializers.CharField(source='task.key', required=False, read_only=True)
+    key = serializers.CharField(source='task.key', required=False, read_only=True)
+    created_when = serializers.DateTimeField(source='task.created_when', required=False, read_only=True)
+    name = serializers.CharField(source='task.name', required=False, read_only=True)
     solutions = serializers.SerializerMethodField()
     public_datasets = serializers.SerializerMethodField()
 

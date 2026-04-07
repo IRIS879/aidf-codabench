@@ -20,6 +20,7 @@ from competitions.models import (
 from forums.models import Forum
 from leaderboards.models import Leaderboard
 from profiles.models import User
+from queues.models import Queue
 from tasks.models import Task
 
 from api.serializers.queues import QueueSerializer
@@ -412,11 +413,11 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
 
 class CompetitionUpdateSerializer(CompetitionSerializer):
     phases = PhaseUpdateSerializer(many=True)
-    queue = None
+    queue = serializers.PrimaryKeyRelatedField(queryset=Queue.objects.all(), required=False, allow_null=True)
 
 
 class CompetitionCreateSerializer(CompetitionSerializer):
-    queue = None
+    queue = serializers.PrimaryKeyRelatedField(queryset=Queue.objects.all(), required=False, allow_null=True)
 
 
 class CompetitionDetailSerializer(serializers.ModelSerializer):

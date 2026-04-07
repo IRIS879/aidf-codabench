@@ -72,7 +72,7 @@
 
                 <div class="field submission-upload-section">
                     <div class="upload-block">
-                        <label class="upload-label">Prediction ZIP</label>
+                        <label class="upload-label">Submission ZIP</label>
                         <input-file
                             name="data_file"
                             ref="data_file"
@@ -291,7 +291,7 @@
         console.log("[submission-upload] model_card type =", model_card_file ? model_card_file.type : null)
 
         if (!prediction_file) {
-            self.errors.data_file = "Please select a prediction ZIP file"
+            self.errors.data_file = "Please select a submission ZIP file"
         } else if (!prediction_file.name.toLowerCase().endsWith('.zip')) {
             self.errors.data_file = "Prediction file must be a .zip"
         }
@@ -354,7 +354,7 @@
 
             if (!prediction_file) {
                 console.error("[submission-upload] No prediction file found inside upload()")
-                self.errors.data_file = "Please select a prediction ZIP file"
+                self.errors.data_file = "Please select a submission ZIP file"
                 self.is_submitting = false
                 self.update()
                 return
@@ -477,6 +477,9 @@
                                     })
                                     console.error("[submission-upload] parsed errors =", errors)
                                     self.errors = errors
+                                    if (errors.model_card_file) {
+                                        toastr.error(errors.model_card_file)
+                                    }
                                     self.update()
                                 } catch (e) {
                                     console.error("[submission-upload] create_submission FAIL parse error", e)
@@ -513,10 +516,10 @@
                             self.update()
                         } catch (e) {
                             console.error("[submission-upload] create_dataset FAIL parse error", e)
-                            toastr.error("Prediction ZIP upload failed")
+                            toastr.error("Submission ZIP upload failed")
                         }
                     } else {
-                        toastr.error("Prediction ZIP upload failed")
+                        toastr.error("Submission ZIP upload failed")
                     }
 
                     self.is_submitting = false

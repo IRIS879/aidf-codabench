@@ -31,12 +31,28 @@
                 <div class="ui six item secondary pointing menu">
                     <a class="active item" data-tab="competition_details">
                         Details
+                        <i class="check circle green icon" show="{ section_valid.details }"></i>
                     </a>
-                    <a class="item" data-tab="participation">Participation</a>
-                    <a class="item" data-tab="pages">Pages</a>
-                    <a class="item" data-tab="phases">Phases</a>
-                    <a class="item" data-tab="leaderboard">Leaderboard</a>
-                    <a class="item" data-tab="collaborators">Administrators</a>
+                    <a class="item" data-tab="participation">
+                        Participation
+                        <i class="check circle green icon" show="{ section_valid.participation }"></i>
+                    </a>
+                    <a class="item" data-tab="pages">
+                        Pages
+                        <i class="check circle green icon" show="{ section_valid.pages }"></i>
+                    </a>
+                    <a class="item" data-tab="phases">
+                        Phases
+                        <i class="check circle green icon" show="{ section_valid.phases }"></i>
+                    </a>
+                    <a class="item" data-tab="leaderboard">
+                        Leaderboard
+                        <i class="check circle green icon" show="{ section_valid.leaderboard }"></i>
+                    </a>
+                    <a class="item" data-tab="collaborators">
+                        Administrators
+                        <i class="check circle green icon" show="{ section_valid.collaborators }"></i>
+                    </a>
                 </div>
 
                 <div class="ui active tab" data-tab="competition_details">
@@ -83,6 +99,14 @@ var self = this
 
 self.competition = {}
 self.errors = {}
+self.section_valid = {
+    details: false,
+    participation: false,
+    pages: false,
+    phases: false,
+    leaderboard: false,
+    collaborators: true
+}
 
 self.save = function () {
     self.competition.published = self.refs.publish.checked
@@ -130,8 +154,29 @@ CODALAB.events.on('competition_data_update', function (data) {
     self.update()
 })
 
+CODALAB.events.on('competition_is_valid_update', function (section, is_valid) {
+    var section_key = section === 'leaderboards' ? 'leaderboard' : section
+    if (Object.prototype.hasOwnProperty.call(self.section_valid, section_key)) {
+        self.section_valid[section_key] = !!is_valid
+        self.update()
+    }
+})
+
 self.on('mount', function () {
     $('.menu .item').tab()
+
+    if (self.opts.competition_id) {
+        CODALAB.api.get_competition(self.opts.competition_id)
+            .done(function (competition) {
+                self.competition = competition || {}
+                self.refs.publish.checked = !!self.competition.published
+                CODALAB.events.trigger('competition_loaded', self.competition)
+                self.update()
+            })
+            .fail(function () {
+                toastr.error('Could not load existing competition settings.')
+            })
+    }
 })
 </script>
 </competition-form>

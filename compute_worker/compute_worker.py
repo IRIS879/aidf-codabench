@@ -394,6 +394,14 @@ class Run:
         self.rolling_period_col = run_args.get("period_col", run_args.get("year_col", "yyyy")) or "yyyy"
         self.rolling_start_period = run_args.get("rolling_start_period")
         self.rolling_end_period = run_args.get("rolling_end_period")
+        static_split_column = run_args.get("static_split_column")
+        static_split_value = run_args.get("static_split_value")
+        self.static_split_column = str(static_split_column).strip() if static_split_column is not None else None
+        self.static_split_value = str(static_split_value).strip() if static_split_value is not None else None
+        if self.static_split_column == "":
+            self.static_split_column = None
+        if self.static_split_value == "":
+            self.static_split_value = None
         self.period_sort_strategy = None
         self.period_key_to_label = {}
         self.period_keys_ordered = []
@@ -1443,6 +1451,86 @@ class Run:
         self._merge_train_with_labels(round_input_dir, round_ref_dir)
         return round_input_dir, round_ref_dir
 
+    def _has_static_split_config(self):
+        return bool(self.static_split_column) and bool(self.static_split_value)
+
+    def _prepare_static_split_data(self):
+        if not self._has_static_split_config():
+            raise SubmissionException(
+                "Static split is not configured. Set both static_split_column and static_split_value."
+            )
+
+        round_input_dir = os.path.join(self.root_dir, "input_data_static_split")
+        round_ref_dir = os.path.join(self.root_dir, "input_ref_static_split")
+        self._ensure_clean_dir(round_input_dir)
+        self._ensure_clean_dir(round_ref_dir)
+
+        # Preserve rolling configuration; static split temporarily reuses the same slicing helpers.
+        prev_period_col = self.rolling_period_col
+        prev_strategy = self.period_sort_strategy
+        prev_key_to_label = dict(self.period_key_to_label)
+        prev_period_keys_ordered = list(self.period_keys_ordered)
+        try:
+            self.rolling_period_col = self.static_split_column
+            period_keys = self._build_period_catalog()
+            split_key = self._normalize_boundary_key(
+                self.static_split_value, self.period_sort_strategy
+            )
+            if split_key is None:
+                raise SubmissionException(
+                    f"Could not parse static split value '{self.static_split_value}' "
+                    f"for column '{self.static_split_column}'."
+                )
+
+            train_predicate = lambda p: p < split_key
+            test_predicate = lambda p: p >= split_key
+            self._slice_input_data_by_predicates(
+                round_input_dir, train_predicate, test_predicate
+            )
+
+            # Pass through full reference directory for scoring stage compatibility.
+            master_ref_dir = os.path.join(self.root_dir, "input", "ref")
+            for src_path, rel_path in self._list_files(master_ref_dir):
+                dst_path = os.path.join(round_ref_dir, rel_path)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+
+            self._merge_train_with_labels(round_input_dir, round_ref_dir)
+
+            train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
+            test_candidates = glob.glob(os.path.join(round_input_dir, "test*.csv"))
+            train_rows = (
+                self._count_csv_rows(train_candidates[0]) if train_candidates else 0
+            )
+            test_rows = (
+                self._count_csv_rows(test_candidates[0]) if test_candidates else 0
+            )
+            if train_rows <= 0:
+                raise SubmissionException(
+                    "Static split produced an empty train set. Adjust static split settings."
+                )
+            if test_rows <= 0:
+                raise SubmissionException(
+                    "Static split produced an empty test set. Adjust static split settings."
+                )
+            if len(period_keys) < 2:
+                raise SubmissionException(
+                    "Static split requires at least two distinct period values."
+                )
+
+            split_label = self.period_key_to_label.get(split_key, str(self.static_split_value))
+            return round_input_dir, round_ref_dir, {
+                "split_column": self.static_split_column,
+                "split_value": split_label,
+                "train_rows": train_rows,
+                "test_rows": test_rows,
+            }
+        finally:
+            self.rolling_period_col = prev_period_col
+            self.period_sort_strategy = prev_strategy
+            self.period_key_to_label = prev_key_to_label
+            self.period_keys_ordered = prev_period_keys_ordered
+
     def _count_csv_rows(self, path):
         if not os.path.exists(path):
             return 0
@@ -2360,9 +2448,34 @@ class Run:
                     self.logs = {}
                     self.completed_program_counter = 0
                     self.watch = True
-                    # Keep rolling behavior unchanged; only static scoring runs sequentially
-                    # so ingestion can materialize predictions before scoring consumes input/res.
-                    self._run_programs_sequential(program_dir, ingestion_program_dir)
+                    if self._has_static_split_config():
+                        round_input_dir, round_ref_dir, split_meta = self._prepare_static_split_data()
+                        logger.info(
+                            "Running static scoring with configured split: column=%s split_value=%s",
+                            split_meta["split_column"],
+                            split_meta["split_value"],
+                        )
+                        logger.info(
+                            "Static split rows: train=%s test=%s",
+                            split_meta["train_rows"],
+                            split_meta["test_rows"],
+                        )
+                        self._log_round_input_tree(
+                            round_input_dir, f"static-{split_meta['split_value']}"
+                        )
+                        self._run_programs_sequential(
+                            program_dir,
+                            ingestion_program_dir,
+                            input_data_dir=round_input_dir,
+                            input_ref_dir=round_ref_dir,
+                        )
+                    else:
+                        logger.info(
+                            "Static split config not set; using legacy static scoring pipeline."
+                        )
+                        # Keep rolling behavior unchanged; only static scoring runs sequentially
+                        # so ingestion can materialize predictions before scoring consumes input/res.
+                        self._run_programs_sequential(program_dir, ingestion_program_dir)
             else:
                 logger.info("Running scoring program, and then ingestion program")
                 self.logs = {}
@@ -2470,6 +2583,9 @@ class Run:
             prog_status["rollingEndPeriod"] = self.rolling_end_period
             prog_status["periodCol"] = self.rolling_period_col
             prog_status["periodSortStrategy"] = self.period_sort_strategy
+        elif self._has_static_split_config():
+            prog_status["staticSplitColumn"] = self.static_split_column
+            prog_status["staticSplitValue"] = self.static_split_value
 
         logger.info(f"Metadata output: {prog_status}")
 

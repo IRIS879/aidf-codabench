@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import re
 from os.path import basename
 
 from django.core.cache import cache
@@ -17,6 +19,8 @@ from utils.data import make_url_sassy
 from tasks.models import Task
 from queues.models import Queue
 
+logger = logging.getLogger(__name__)
+
 
 def ensure_submission_leaderboard(submission):
     phase = getattr(submission, "phase", None)
@@ -27,18 +31,164 @@ def ensure_submission_leaderboard(submission):
         submission.save(update_fields=["leaderboard"])
 
 
-def extract_model_card_metadata(uploaded_file):
-    """
-    Extract model name from the visible PDF text.
+def _has_meaningful_model_card_value(value):
+    if not value:
+        return False
 
-    Expected format in the model card:
-        Model name: <actual model name>
+    normalized = " ".join(str(value).split()).strip().lower().rstrip(".")
+    placeholder_values = {
+        "",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "tbd",
+        "todo",
+        "unknown",
+    }
 
-    Returns:
-        (model_name, parsed_json)
-    """
+    if normalized in placeholder_values:
+        return False
+
+    if normalized.startswith("briefly describe the purpose of the model"):
+        return False
+
+    return True
+
+
+MODEL_CARD_OVERVIEW_PROMPT = (
+    "Briefly describe the purpose of the model and the problem it is designed to solve."
+)
+
+
+def _extract_model_card_section(text, heading, next_headings):
+    heading_pattern = re.escape(heading)
+    next_heading_pattern = "|".join(re.escape(item) for item in next_headings)
+    match = re.search(
+        rf"{heading_pattern}\s*(?P<section>.*?)(?=^\s*(?:{next_heading_pattern})\s*$|\Z)",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return ""
+    return match.group("section").strip()
+
+
+def _extract_model_card_section_fallback(text, heading, next_headings):
+    normalized_text = " ".join(text.split())
+    heading_pattern = re.escape(heading)
+    next_heading_pattern = "|".join(re.escape(item) for item in next_headings)
+    match = re.search(
+        rf"{heading_pattern}\s*(?P<section>.*?)(?=\s+(?:{next_heading_pattern})\b|$)",
+        normalized_text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return match.group("section").strip()
+
+
+def _section_needs_fallback(section_text, next_headings):
+    if not section_text:
+        return True
+
+    for heading in next_headings:
+        if re.search(rf"\b{re.escape(heading)}\b", section_text, flags=re.IGNORECASE):
+            return True
+
+    return False
+
+
+def _trim_field_value(candidate, stop_labels):
+    trimmed_candidate = candidate.strip()
+    if not trimmed_candidate:
+        return ""
+
+    stop_pattern = "|".join(rf"{label}\s*:" for label in stop_labels)
+    match = re.search(rf"^(?P<value>.*?)(?=\s+(?:{stop_pattern})|$)", trimmed_candidate, flags=re.IGNORECASE)
+    if not match:
+        return trimmed_candidate
+    return match.group("value").strip()
+
+
+def _extract_model_information_fields(model_information):
+    extracted_fields = {
+        "model_name": "",
+        "task": "",
+        "output": "",
+    }
+
+    for raw_line in model_information.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = re.match(r"(model\s*name|task|output)\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if not match:
+            continue
+
+        label = re.sub(r"\s+", "_", match.group(1).strip().lower())
+        stop_labels = ["model name", "task", "output"]
+        stop_labels = [item for item in stop_labels if item.replace(" ", "_") != label]
+        candidate = _trim_field_value(match.group(2), stop_labels)
+        if not candidate:
+            extracted_fields[label] = ""
+            continue
+
+        if re.match(r"^(model\s*name|task|output)\s*:", candidate, flags=re.IGNORECASE):
+            extracted_fields[label] = ""
+            continue
+
+        extracted_fields[label] = candidate
+
+    if all(extracted_fields.values()):
+        return extracted_fields
+
+    normalized_information = " ".join(model_information.split())
+    field_patterns = {
+        "model_name": r"model\s*name\s*:\s*(?P<value>.*?)(?=\s+task\s*:|\s+output\s*:|\s+overview\b|$)",
+        "task": r"task\s*:\s*(?P<value>.*?)(?=\s+output\s*:|\s+overview\b|$)",
+        "output": r"output\s*:\s*(?P<value>.*?)(?=\s+overview\b|$)",
+    }
+
+    for field_name, pattern in field_patterns.items():
+        if extracted_fields[field_name]:
+            continue
+
+        match = re.search(pattern, normalized_information, flags=re.IGNORECASE)
+        if not match:
+            continue
+
+        candidate = match.group("value").strip()
+        if not candidate:
+            continue
+
+        if re.match(r"^(model\s*name|task|output)\s*:", candidate, flags=re.IGNORECASE):
+            continue
+
+        extracted_fields[field_name] = candidate
+
+    return extracted_fields
+
+
+def _extract_meaningful_overview(overview):
+    cleaned_overview = overview.strip()
+    if not cleaned_overview:
+        return ""
+
+    prompt_pattern = re.escape(MODEL_CARD_OVERVIEW_PROMPT)
+    cleaned_overview = re.sub(prompt_pattern, "", cleaned_overview, flags=re.IGNORECASE).strip()
+    return cleaned_overview
+
+
+def extract_model_card_metadata_debug(uploaded_file):
     if not uploaded_file:
-        return None, None
+        return {
+            "model_name": None,
+            "parsed_json": None,
+            "failure_reasons": ["missing file"],
+            "extracted_text_preview": "",
+        }
 
     reader_cls = None
 
@@ -51,7 +201,12 @@ def extract_model_card_metadata(uploaded_file):
             reader_cls = None
 
     if reader_cls is None:
-        return None, None
+        return {
+            "model_name": None,
+            "parsed_json": None,
+            "failure_reasons": ["pdf reader unavailable"],
+            "extracted_text_preview": "",
+        }
 
     try:
         uploaded_file.seek(0)
@@ -66,35 +221,102 @@ def extract_model_card_metadata(uploaded_file):
                 continue
 
         full_text = "\n".join(extracted_text)
+        extracted_text_preview = full_text[:2000]
 
-        import re
-
-        model_name = None
-        normalized_text = " ".join(full_text.split())
-
-        match = re.search(
-            r"model\s*name\s*:\s*(.+?)(?=\s+(task|output|overview|data|model|evaluation|interpretability|limitations|intended use|author)\s*:?\s|$)",
-            normalized_text,
-            flags=re.IGNORECASE,
+        model_information = _extract_model_card_section(
+            full_text,
+            "Model Information",
+            ["Overview"],
         )
+        if _section_needs_fallback(model_information, ["Overview"]):
+            model_information = _extract_model_card_section_fallback(
+                full_text,
+                "Model Information",
+                ["Overview"],
+            )
 
-        if match:
-            model_name = match.group(1).strip()
+        overview = _extract_model_card_section(
+            full_text,
+            "Overview",
+            ["Data", "Model", "Evaluation", "Interpretability", "Limitations", "Intended Use", "Author"],
+        )
+        if _section_needs_fallback(
+            overview,
+            ["Data", "Model", "Evaluation", "Interpretability", "Limitations", "Intended Use", "Author"],
+        ):
+            overview = _extract_model_card_section_fallback(
+                full_text,
+                "Overview",
+                ["Data", "Model", "Evaluation", "Interpretability", "Limitations", "Intended Use", "Author"],
+            )
+        model_information_fields = _extract_model_information_fields(model_information)
+        overview_content = _extract_meaningful_overview(overview)
+
+        failure_reasons = []
+        if not _has_meaningful_model_card_value(model_information):
+            failure_reasons.append('missing "Model Information" section')
+        if not _has_meaningful_model_card_value(model_information_fields["model_name"]):
+            failure_reasons.append('missing "Model Name" value')
+        if not _has_meaningful_model_card_value(model_information_fields["task"]):
+            failure_reasons.append('missing "Task" value')
+        if not _has_meaningful_model_card_value(model_information_fields["output"]):
+            failure_reasons.append('missing "Output" value')
+        if not _has_meaningful_model_card_value(overview_content):
+            failure_reasons.append('missing meaningful "Overview" content')
+
+        if failure_reasons:
+            uploaded_file.seek(0)
+            return {
+                "model_name": None,
+                "parsed_json": None,
+                "failure_reasons": failure_reasons,
+                "extracted_text_preview": extracted_text_preview,
+            }
 
         parsed_json = {
-            "extracted_text_preview": full_text[:2000],
-            "model_name": model_name or "",
+            "extracted_text_preview": extracted_text_preview,
+            "model_information": model_information,
+            "model_name": model_information_fields["model_name"],
+            "task": model_information_fields["task"],
+            "output": model_information_fields["output"],
+            "overview": overview_content,
         }
 
         uploaded_file.seek(0)
-        return model_name, parsed_json
+        return {
+            "model_name": model_information_fields["model_name"],
+            "parsed_json": parsed_json,
+            "failure_reasons": [],
+            "extracted_text_preview": extracted_text_preview,
+        }
 
     except Exception:
         try:
             uploaded_file.seek(0)
         except Exception:
             pass
-        return None, None
+        return {
+            "model_name": None,
+            "parsed_json": None,
+            "failure_reasons": ["pdf text extraction failed"],
+            "extracted_text_preview": "",
+        }
+
+
+def extract_model_card_metadata(uploaded_file):
+    """
+    Extract structured metadata from the visible PDF text.
+
+    Successful parsing requires:
+        - a Model Information section
+        - non-empty Model Name, Task, and Output values
+        - a non-empty Overview section with real content
+
+    Returns:
+        (model_name, parsed_json)
+    """
+    debug_result = extract_model_card_metadata_debug(uploaded_file)
+    return debug_result["model_name"], debug_result["parsed_json"]
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -211,15 +433,41 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
 
     def _validate_model_card_pdf(self, uploaded_file):
         if not uploaded_file:
-            raise ValidationError("This competition requires a model card PDF.")
+            raise serializers.ValidationError({
+                "model_card_file": "This competition requires a model card PDF."
+            })
 
         filename = getattr(uploaded_file, "name", "") or ""
         if not filename.lower().endswith(".pdf"):
-            raise ValidationError("Model card file must be a .pdf.")
+            raise serializers.ValidationError({
+                "model_card_file": "Model card file must be a .pdf."
+            })
 
         content_type = getattr(uploaded_file, "content_type", "") or ""
         if content_type and "pdf" not in content_type.lower():
-            raise ValidationError("Uploaded model card must be a PDF.")
+            raise serializers.ValidationError({
+                "model_card_file": "Uploaded model card must be a PDF."
+            })
+
+        debug_result = extract_model_card_metadata_debug(uploaded_file)
+        model_name = debug_result["model_name"]
+        parsed_json = debug_result["parsed_json"]
+        if not parsed_json:
+            logger.warning(
+                "Model card parsing failed for %s. Reasons=%s Preview=%r",
+                filename,
+                debug_result["failure_reasons"],
+                debug_result["extracted_text_preview"],
+            )
+            raise serializers.ValidationError({
+                "model_card_file": (
+                    "Model card parsing failed: "
+                    + "; ".join(debug_result["failure_reasons"])
+                )
+            })
+
+        self._parsed_model_card_name = model_name
+        self._parsed_model_card_json = parsed_json
 
     def create(self, validated_data):
         tasks = validated_data.pop('tasks', None)
@@ -230,8 +478,8 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         uploaded_pdf = getattr(self, "_uploaded_model_card_file", None) or model_card_file
         if uploaded_pdf:
             sub.model_card_file.save(uploaded_pdf.name, uploaded_pdf, save=False)
-
-            model_name, parsed_json = extract_model_card_metadata(uploaded_pdf)
+            model_name = getattr(self, "_parsed_model_card_name", None)
+            parsed_json = getattr(self, "_parsed_model_card_json", None)
 
             if parsed_json:
                 sub.model_card_status = Submission.MODEL_CARD_PARSED

@@ -1,13 +1,15 @@
 import json
 import uuid
 from datetime import timedelta, date
+from io import BytesIO
 from unittest import mock
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework import serializers
 
-from api.serializers.submissions import SubmissionCreationSerializer
+from api.serializers.submissions import SubmissionCreationSerializer, extract_model_card_metadata
 from api.serializers.competitions import CompetitionSerializer
 from competitions.models import Submission
 from competitions.tasks import run_submission, submission_status_cleanup
@@ -458,6 +460,189 @@ class FactSheetTests(SubmissionTestCase):
         assert resp.status_code == 200
         submission.refresh_from_db()
         assert json.loads(data) == submission.fact_sheet_answers
+
+
+class ModelCardParsingTests(TestCase):
+    def make_pdf_file(self):
+        pdf_file = BytesIO(b"%PDF-1.4 mock")
+        pdf_file.name = "model_card.pdf"
+        pdf_file.content_type = "application/pdf"
+        return pdf_file
+
+    def mock_reader(self, text):
+        page = mock.Mock()
+        page.extract_text.return_value = text
+        reader = mock.Mock()
+        reader.pages = [page]
+        return reader
+
+    def test_extract_model_card_metadata_rejects_incomplete_template(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+            Model Information
+            Model Name:
+            Task: Classification
+            Output: Label
+
+            Overview
+            Briefly describe the purpose of the model and the problem it is designed to solve.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name is None
+        assert parsed_json is None
+
+    def test_extract_model_card_metadata_requires_task_and_output(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+
+            Model Information
+            Model Name: Baseline Model
+            Task:
+            Output:
+
+            Overview
+            This model predicts labels for the benchmark task.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name is None
+        assert parsed_json is None
+
+    def test_extract_model_card_metadata_does_not_use_task_output_as_model_name(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+
+            Model Information
+
+            Model Name:
+            Task:
+            Output:
+
+            Overview
+            Briefly describe the purpose of the model and the problem it is designed to solve.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name is None
+        assert parsed_json is None
+
+    def test_extract_model_card_metadata_rejects_overview_prompt_without_added_content(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+            Model Information
+            Model Name: Baseline Model
+            Task: Classification
+            Output: Label
+
+            Overview
+            Briefly describe the purpose of the model and the problem it is designed to solve.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name is None
+        assert parsed_json is None
+
+    def test_extract_model_card_metadata_accepts_filled_required_sections(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+            Model Information
+            Model Name: Baseline Model
+            Task: Classification
+            Output: Label
+
+            Overview
+            Briefly describe the purpose of the model and the problem it is designed to solve.
+            This model predicts labels for the benchmark task.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name == "Baseline Model"
+        assert parsed_json["model_name"] == "Baseline Model"
+        assert parsed_json["task"] == "Classification"
+        assert parsed_json["output"] == "Label"
+        assert parsed_json["overview"] == "This model predicts labels for the benchmark task."
+
+    def test_extract_model_card_metadata_accepts_overview_without_template_prompt(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+            Model Information
+            Model Name: Baseline Model
+            Task: Classification
+            Output: Label
+
+            Overview
+            This model predicts labels for the benchmark task.
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name == "Baseline Model"
+        assert parsed_json["overview"] == "This model predicts labels for the benchmark task."
+
+    def test_extract_model_card_metadata_accepts_single_line_model_information_extraction(self):
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card  Model Information Model Name: test model name Task: test task Output: test output
+            Overview Briefly describe the purpose of the model and the problem it is designed to solve. test overview
+            Data
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            model_name, parsed_json = extract_model_card_metadata(self.make_pdf_file())
+
+        assert model_name == "test model name"
+        assert parsed_json["model_name"] == "test model name"
+        assert parsed_json["task"] == "test task"
+        assert parsed_json["output"] == "test output"
+        assert parsed_json["overview"] == "test overview"
+        assert len(parsed_json["model_name"]) < 120
+        assert parsed_json["model_name"] == "test model name"
+
+    def test_serializer_model_card_validation_uses_field_error(self):
+        serializer = SubmissionCreationSerializer()
+        mock_pdf_reader = mock.Mock(return_value=self.mock_reader(
+            """
+            Model Card
+            Model Information
+            Model Name:
+            Task: Classification
+            Output: Label
+
+            Overview
+            """
+        ))
+
+        with mock.patch.dict("sys.modules", {"pypdf": mock.Mock(PdfReader=mock_pdf_reader)}):
+            with self.assertRaises(serializers.ValidationError) as exc:
+                serializer._validate_model_card_pdf(self.make_pdf_file())
+
+        assert "model_card_file" in exc.exception.detail
+        assert "Model card parsing failed" in str(exc.exception.detail["model_card_file"][0])
 
 
 class TestSubmissionTasks(SubmissionTestCase):

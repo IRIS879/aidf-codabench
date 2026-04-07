@@ -477,6 +477,9 @@
                                     })
                                     console.error("[submission-upload] parsed errors =", errors)
                                     self.errors = errors
+                                    if (errors.model_card_file) {
+                                        toastr.error(errors.model_card_file)
+                                    }
                                     self.update()
                                 } catch (e) {
                                     console.error("[submission-upload] create_submission FAIL parse error", e)

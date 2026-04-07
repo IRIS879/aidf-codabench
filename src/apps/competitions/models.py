@@ -119,6 +119,9 @@ class Competition(models.Model):
     rolling_window_size = models.PositiveIntegerField(null=True, blank=True)
     rolling_window_start_date = models.DateField(null=True, blank=True)
     rolling_window_end_date = models.DateField(null=True, blank=True)
+    static_split_column = models.CharField(max_length=128, null=True, blank=True)
+    static_split_value = models.CharField(max_length=128, null=True, blank=True)
+    runtime_limit_seconds = models.PositiveIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"competition-{self.title}-{self.pk}-{self.competition_type}"
@@ -145,6 +148,18 @@ class Competition(models.Model):
                 )
             if self.rolling_window_size is not None and self.rolling_window_size <= 0:
                 raise ValidationError({"rolling_window_size": "Window size must be a positive integer."})
+            self.static_split_column = None
+            self.static_split_value = None
+        else:
+            has_static_column = bool((self.static_split_column or "").strip())
+            has_static_value = bool((self.static_split_value or "").strip())
+            if has_static_column ^ has_static_value:
+                raise ValidationError(
+                    {
+                        "static_split_column": "Provide both static split column and split value, or leave both empty.",
+                        "static_split_value": "Provide both static split column and split value, or leave both empty.",
+                    }
+                )
 
     @property
     def bundle_dataset(self):

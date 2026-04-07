@@ -59,6 +59,8 @@ COMPETITION_FIELDS = [
     "rolling_window_size",
     "rolling_window_start_date",
     "rolling_window_end_date",
+    "static_split_column",
+    "static_split_value",
 ]
 
 TASK_FIELDS = [
@@ -136,12 +138,13 @@ def _compute_queue_for_submission(submission: Submission) -> str:
 def _send_to_compute_worker(submission, is_scoring):
     competition = submission.phase.competition
     training_mode = competition.training_mode or Competition.TRAINING_MODE_STATIC
+    effective_execution_time_limit = competition.runtime_limit_seconds or submission.phase.execution_time_limit
     run_args = {
         "user_pk": submission.owner.pk,
         "submissions_api_url": settings.SUBMISSIONS_API_URL,
         "secret": submission.secret,
         "docker_image": competition.docker_image,
-        "execution_time_limit": min(MAX_EXECUTION_TIME_LIMIT, submission.phase.execution_time_limit),
+        "execution_time_limit": min(MAX_EXECUTION_TIME_LIMIT, effective_execution_time_limit),
         "id": submission.pk,
         "is_scoring": is_scoring,
         "competition_id": competition.pk,
@@ -174,6 +177,9 @@ def _send_to_compute_worker(submission, is_scoring):
         run_args["rolling_end_year"] = (
             competition.rolling_window_end_date.year if competition.rolling_window_end_date else None
         )
+    else:
+        run_args["static_split_column"] = competition.static_split_column
+        run_args["static_split_value"] = competition.static_split_value
     worker_queue = _compute_queue_for_submission(submission)
 
     if not submission.detailed_result.name and competition.enable_detailed_results:
@@ -268,11 +274,11 @@ def _send_to_compute_worker(submission, is_scoring):
 
     # Pad timelimit so worker has time to cleanup
     time_padding = 60 * 20  # 20 minutes
-    time_limit = submission.phase.execution_time_limit + time_padding
+    time_limit = effective_execution_time_limit + time_padding
 
     if competition.queue:  # if the competition is running on a custom queue, not the default queue
         submission.queue_name = competition.queue.name or ''
-        run_args['execution_time_limit'] = submission.phase.execution_time_limit  # use the competition time limit
+        run_args['execution_time_limit'] = effective_execution_time_limit
         submission.save()
 
         # Send to special queue? Using `celery_app` var name here since we'd be overriding the imported `app`

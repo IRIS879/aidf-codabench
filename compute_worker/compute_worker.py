@@ -683,12 +683,25 @@ class Run:
         # Return the zip file path for other uses, e.g. for creating a MD5 hash to identify it
         return bundle_file
 
+    def _is_ignored_bundle_entry(self, entry):
+        return (
+            entry == "__MACOSX"
+            or entry == ".DS_Store"
+            or entry.startswith("._")
+        )
+
     def _normalize_single_root_dir(self, root_dir):
         if not os.path.isdir(root_dir):
             return
         entries = os.listdir(root_dir)
         if not entries:
             return
+        entries_to_ignore = [
+            entry for entry in entries if self._is_ignored_bundle_entry(entry)
+        ]
+        entries = [
+            entry for entry in entries if not self._is_ignored_bundle_entry(entry)
+        ]
         child_dirs = [
             entry
             for entry in entries
@@ -705,6 +718,12 @@ class Run:
         for entry in os.listdir(single_dir):
             shutil.move(os.path.join(single_dir, entry), os.path.join(root_dir, entry))
         shutil.rmtree(single_dir)
+        for entry in entries_to_ignore:
+            path = os.path.join(root_dir, entry)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            elif os.path.exists(path):
+                os.remove(path)
         logger.info("Normalized single-root bundle directory: %s", root_dir)
 
     async def _run_container_engine_cmd(self, container, kind):

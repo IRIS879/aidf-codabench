@@ -1,0 +1,8 @@
+FROM codalab/codalab-legacy:py37
+
+RUN pip install --no-cache-dir \
+    "numpy<1.24" \
+    "pandas<2" \
+    "scikit-learn<1.1" \
+    "lifelines<0.28" \
+    "scikit-survival<0.20"

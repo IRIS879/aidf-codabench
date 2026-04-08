@@ -1,0 +1,17 @@
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "numpy<2" \
+    "pandas<3" \
+    "scikit-learn<1.6" \
+    "lifelines<0.31" \
+    "scikit-survival<0.24"

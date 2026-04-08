@@ -553,6 +553,23 @@ class Run:
         self._update_submission(data)
 
     def _get_container_image(self, image_name):
+        try:
+            local_image = client.inspect_image(image_name)
+            logger.info(
+                "Using existing local image for %s: %s",
+                image_name,
+                local_image.get("Id", "unknown"),
+            )
+            return
+        except docker.errors.NotFound:
+            logger.info("Local image not found for %s, attempting pull", image_name)
+        except docker.errors.APIError as image_lookup_error:
+            logger.warning(
+                "Failed checking local image %s: %s. Falling back to pull.",
+                image_name,
+                image_lookup_error,
+            )
+
         logger.info("Running pull for image: {}".format(image_name))
         retries, max_retries = (0, 3)
         while retries < max_retries:

@@ -42,6 +42,64 @@ class CompetitionViewSet(ModelViewSet):
     queryset = Competition.objects.all()
     permission_classes = (AllowAny,)
 
+    def _task_key_from_phase_item(self, item):
+        if isinstance(item, dict):
+            task_key = item.get("task") or item.get("key") or item.get("value")
+            if not task_key:
+                raise ValidationError({
+                    "tasks": f"Invalid task format received: {item}"
+                })
+            return task_key
+        if isinstance(item, (str, int)):
+            return item
+        raise ValidationError({
+            "tasks": f"Invalid task format received: {item}"
+        })
+
+    def _normalize_phase_tasks_for_update(self, phase):
+        if self.request.method != "PATCH":
+            phase["tasks"] = [
+                self._task_key_from_phase_item(item)
+                for item in phase.get("tasks", [])
+            ]
+            return
+
+        phase_id = phase.get("id")
+        if not phase_id:
+            return
+
+        phase["tasks"] = [
+            {
+                "phase": phase_id,
+                "task": self._task_key_from_phase_item(task_item),
+                "order_index": (
+                    task_item.get("order_index", index)
+                    if isinstance(task_item, dict)
+                    else index
+                ),
+            }
+            for index, task_item in enumerate(phase.get("tasks", []))
+        ]
+
+    def _normalize_phase_dataset(self, phase, field_name):
+        value = phase.get(field_name)
+        if not value:
+            phase[field_name] = None
+            return
+
+        if isinstance(value, dict):
+            dataset_key = value.get("value") or value.get("key")
+            if not dataset_key:
+                phase[field_name] = None
+                return
+            try:
+                phase[field_name] = Data.objects.get(key=dataset_key).id
+            except Data.DoesNotExist:
+                phase[field_name] = None
+            return
+
+        phase[field_name] = value
+
 
     @action(detail=True, methods=['get'], permission_classes=(AllowAny,), url_path='model-card-template')
     def model_card_template(self, request, pk=None):
@@ -236,32 +294,10 @@ class CompetitionViewSet(ModelViewSet):
         if "phases" in data:
             for phase in data["phases"]:
                 if "tasks" in phase:
-                    normalized_tasks = []
-
-                    for item in phase["tasks"]:
-
-                        # Case 1: {"task": "..."}
-                        if isinstance(item, dict) and "task" in item:
-                            normalized_tasks.append(item["task"])
-
-                        # Case 2: {"key": "..."}
-                        elif isinstance(item, dict) and "value" in item:
-                            normalized_tasks.append(item["value"])   
-                        elif isinstance(item, dict) and "key" in item:
-                            normalized_tasks.append(item["key"])
-                        elif isinstance(item, dict) and "id" in item:
-                            normalized_tasks.append(item["id"])
-
-                        # Case 4: direct uuid/id already
-                        elif isinstance(item, (str, int)):
-                            normalized_tasks.append(item)
-
-                        else:
-                            raise ValidationError({
-                                "tasks": f"Invalid task format received: {item}"
-                            })
-
-                    phase["tasks"] = normalized_tasks
+                    phase["tasks"] = [
+                        self._task_key_from_phase_item(item)
+                        for item in phase["tasks"]
+                    ]
 
         # ----------------------------
         # Handle leaderboard
@@ -281,20 +317,8 @@ class CompetitionViewSet(ModelViewSet):
 
             for phase in data["phases"]:
                 phase["leaderboard"] = leaderboard_id
-
-                try:
-                    phase["public_data"] = Data.objects.get(
-                        key=phase["public_data"]["value"]
-                    ).id
-                except Exception:
-                    phase["public_data"] = None
-
-                try:
-                    phase["starting_kit"] = Data.objects.get(
-                        key=phase["starting_kit"]["value"]
-                    ).id
-                except Exception:
-                    phase["starting_kit"] = None
+                self._normalize_phase_dataset(phase, "public_data")
+                self._normalize_phase_dataset(phase, "starting_kit")
 
         # ----------------------------
         # Create competition
@@ -338,51 +362,30 @@ class CompetitionViewSet(ModelViewSet):
                     if 'id' not in phase:
                         # Create Phase object
                         new_phase_obj = Phase.objects.create(
-                            status=phase["status"],
+                            status=phase.get("status"),
                             index=phase["index"],
                             start=phase['start'],
-                            end=phase['end'] if phase['end'] else None,
+                            end=phase['end'] if phase.get('end') else None,
                             name=phase["name"],
-                            description=phase["description"],
-                            hide_output=phase["hide_output"],
-                            hide_prediction_output=phase["hide_prediction_output"],
-                            hide_score_output=phase["hide_score_output"],
-                            competition=Competition.objects.get(id=data['id'])
+                            description=phase.get("description", ""),
+                            hide_output=phase.get("hide_output", False),
+                            hide_prediction_output=phase.get("hide_prediction_output", False),
+                            hide_score_output=phase.get("hide_score_output", False),
+                            competition=instance
                         )
                         # Get phase id
                         new_phase_id = new_phase_obj.id
-                        # Normalize new phase task payloads into task keys expected by serializer.
-                        normalized_tasks = []
-                        for task_item in phase.get("tasks", []):
-                            if isinstance(task_item, dict):
-                                task_key = (
-                                    task_item.get("key")
-                                    or task_item.get("value")
-                                    or task_item.get("task")
-                                )
-                                if not task_key:
-                                    raise ValidationError({
-                                        "tasks": f"Invalid task format received: {task_item}"
-                                    })
-                                normalized_tasks.append(task_key)
-                            else:
-                                normalized_tasks.append(task_item)
-                        phase["tasks"] = normalized_tasks
+                        phase["id"] = new_phase_id
 
                     phase['leaderboard'] = leaderboard_id
+                    self._normalize_phase_tasks_for_update(phase)
 
                 # Get public_data and starting_kit
                 for phase in data['phases']:
                     # We just need to know what public_data and starting_kit go with this phase
                     # We don't need to serialize the whole object
-                    try:
-                        phase['public_data'] = Data.objects.filter(key=phase['public_data']['value'])[0].id
-                    except TypeError:
-                        phase['public_data'] = None
-                    try:
-                        phase['starting_kit'] = Data.objects.filter(key=phase['starting_kit']['value'])[0].id
-                    except TypeError:
-                        phase['starting_kit'] = None
+                    self._normalize_phase_dataset(phase, 'public_data')
+                    self._normalize_phase_dataset(phase, 'starting_kit')
 
             # Get whitelist emails from data
             whitelist_emails = data.get('whitelist_emails', [])

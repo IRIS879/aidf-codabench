@@ -1,5 +1,6 @@
 import os
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db.models import Q
 from django.http import Http404
@@ -139,7 +140,11 @@ class DataViewSet(ModelViewSet):
         new_dataset.data_file.save(sassy_file_name, ContentFile(''.encode()))
         context = {
             "key": new_dataset.key,
-            "sassy_url": make_url_sassy(new_dataset.data_file.name, 'w'),
+            "sassy_url": make_url_sassy(
+                new_dataset.data_file.name,
+                'w',
+                endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
+            ),
         }
         return Response(context, status=status.HTTP_201_CREATED, headers=headers)
 

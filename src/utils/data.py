@@ -44,12 +44,12 @@ class PathWrapper(object):
         return path
 
 
-def _get_sigv4_s3_client():
+def _get_sigv4_s3_client(endpoint_url=None):
     """
     Create an S3 client that ALWAYS uses SigV4 for presigning.
     This fixes MinIO setups that reject SigV2 presigned URLs.
     """
-    endpoint_url = getattr(settings, "AWS_S3_ENDPOINT_URL", None) or None
+    endpoint_url = endpoint_url or getattr(settings, "AWS_S3_ENDPOINT_URL", None) or None
     region_name = getattr(settings, "AWS_S3_REGION_NAME", None) or "us-east-1"
 
     # Use the same creds you already set for MinIO/AWS
@@ -69,7 +69,7 @@ def _get_sigv4_s3_client():
     )
 
 
-def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type="application/zip"):
+def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type="application/zip", endpoint_url=None):
     """
     Generate a signed URL (read or write) for the configured storage backend.
 
@@ -111,7 +111,7 @@ def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type
             params["ContentType"] = content_type
 
         # Force SigV4 for presigning (fixes MinIO rejecting SigV2 URLs)
-        s3 = _get_sigv4_s3_client()
+        s3 = _get_sigv4_s3_client(endpoint_url=endpoint_url)
 
         return s3.generate_presigned_url(
             client_method,

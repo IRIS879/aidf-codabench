@@ -1569,6 +1569,20 @@ class Run:
         paths = sorted(paths, key=lambda p: (len(os.path.basename(p)), os.path.basename(p)))
         return paths[0]
 
+    def _is_label_like_col(self, name):
+        lowered = (name or "").lower()
+        return "y_" in lowered or "label" in lowered
+
+    def _infer_join_cols_from_fields(self, left_fields, right_fields, excluded_cols=None):
+        excluded = set(excluded_cols or [])
+        join_cols = [
+            col for col in left_fields
+            if col in right_fields and col not in excluded
+        ]
+        if not join_cols:
+            raise SubmissionException("No shared non-label columns found to join input and reference data.")
+        return join_cols
+
     def _merge_train_with_labels(self, round_input_dir, round_ref_dir):
         train_candidates = glob.glob(os.path.join(round_input_dir, "train*.csv"))
         master_ref_dir = os.path.join(self.root_dir, "input", "ref")
@@ -1591,7 +1605,12 @@ class Run:
             if not train_fields:
                 raise SubmissionException(f"Train file is empty: {train_path}")
 
-            if "y_12m" in train_fields:
+            train_label_fields = [
+                name
+                for name in train_fields
+                if self._is_label_like_col(name)
+            ]
+            if train_label_fields:
                 dst_path = os.path.join(round_input_dir, "train.csv")
                 shutil.copy2(train_path, dst_path)
                 logger.info(f"Using existing labeled train file: {dst_path}")
@@ -1600,32 +1619,25 @@ class Run:
             with open(ref_path, newline="") as ref_file:
                 ref_reader = csv.DictReader(ref_file)
                 ref_fields = ref_reader.fieldnames or []
-                if "y_12m" in ref_fields:
-                    label_col = "y_12m"
-                else:
-                    label_col = None
-                    for name in ref_fields:
-                        if "y_" in name.lower() or "label" in name.lower():
-                            label_col = name
-                            break
-                if not label_col:
+                label_cols = [
+                    name
+                    for name in ref_fields
+                    if self._is_label_like_col(name)
+                ]
+                if not label_cols:
                     raise SubmissionException(
-                        f"Could not identify label column in {ref_path}"
+                        f"Could not identify label columns in {ref_path}"
                     )
 
-                join_cols = []
-                for col in ("CompNo", self.rolling_period_col, "yyyy", "mm"):
-                    if col in train_fields and col in ref_fields:
-                        join_cols.append(col)
-                if not join_cols:
-                    raise SubmissionException(
-                        f"No join columns found between {train_path} and {ref_path}"
-                    )
+                join_cols = self._infer_join_cols_from_fields(
+                    train_fields, ref_fields, excluded_cols=label_cols
+                )
+                logger.info("Joining train and reference data using columns: %s", join_cols)
 
                 ref_map = {}
                 for row in ref_reader:
                     key = tuple(row.get(col) for col in join_cols)
-                    ref_map[key] = row.get(label_col)
+                    ref_map[key] = {label_col: row.get(label_col) for label_col in label_cols}
 
         dst_path = os.path.join(round_input_dir, "train.csv")
         written = 0
@@ -1635,21 +1647,32 @@ class Run:
         ) as out_file:
             train_reader = csv.DictReader(train_file)
             out_fields = list(train_reader.fieldnames or [])
-            out_fields.append(label_col)
+            out_fields.extend(
+                label_col for label_col in label_cols if label_col not in out_fields
+            )
             writer = csv.DictWriter(out_file, fieldnames=out_fields)
             writer.writeheader()
             for row in train_reader:
                 key = tuple(row.get(col) for col in join_cols)
-                label_val = ref_map.get(key)
-                if label_val is None or label_val == "":
+                label_vals = ref_map.get(key)
+                if not label_vals:
                     skipped += 1
                     continue
-                row[label_col] = label_val
+                missing_labels = [
+                    label_col
+                    for label_col in label_cols
+                    if label_vals.get(label_col) in (None, "")
+                ]
+                if missing_labels:
+                    skipped += 1
+                    continue
+                for label_col in label_cols:
+                    row[label_col] = label_vals[label_col]
                 writer.writerow(row)
                 written += 1
 
         logger.info(
-            f"Wrote labeled train file: {dst_path} (rows={written}, skipped={skipped})"
+            f"Wrote labeled train file: {dst_path} (rows={written}, skipped={skipped}, label_cols={len(label_cols)})"
         )
 
     def _find_first_csv(self, root_dir):
@@ -1770,11 +1793,10 @@ class Run:
         return u / (n_pos * n_neg)
 
     def _infer_join_cols(self, pred_cols, ref_cols):
-        preferred = ["CompNo", self.rolling_period_col, "yyyy", "mm"]
-        if all(col in pred_cols and col in ref_cols for col in preferred):
-            return preferred
-        join_cols = [col for col in pred_cols if col in ref_cols]
-        return join_cols
+        label_cols = [col for col in ref_cols if self._is_label_like_col(col)]
+        return self._infer_join_cols_from_fields(
+            pred_cols, ref_cols, excluded_cols=label_cols
+        )
 
     def _infer_label_col(self, ref_cols):
         if "y_12m" in ref_cols:

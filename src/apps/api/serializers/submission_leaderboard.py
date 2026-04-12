@@ -1,8 +1,10 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from api.serializers.profiles import SimpleOrganizationSerializer
 from competitions.models import Submission
 from leaderboards.models import SubmissionScore
+from utils.data import make_url_sassy
 
 
 class SubmissionScoreSerializer(serializers.ModelSerializer):
@@ -72,7 +74,12 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
         # Public => everyone can see
         if competition and getattr(competition, 'model_card_is_public', False):
             try:
-                return obj.model_card_file.url
+                bucket_name = getattr(obj.model_card_file.storage, "bucket_name", None)
+                return make_url_sassy(
+                    obj.model_card_file.name,
+                    endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
+                    bucket_name=bucket_name,
+                )
             except Exception:
                 return None
 
@@ -84,7 +91,12 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
             and competition.user_has_admin_permission(user)
         ):
             try:
-                return obj.model_card_file.url
+                bucket_name = getattr(obj.model_card_file.storage, "bucket_name", None)
+                return make_url_sassy(
+                    obj.model_card_file.name,
+                    endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
+                    bucket_name=bucket_name,
+                )
             except Exception:
                 return None
 

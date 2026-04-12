@@ -69,7 +69,14 @@ def _get_sigv4_s3_client(endpoint_url=None):
     )
 
 
-def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type="application/zip", endpoint_url=None):
+def make_url_sassy(
+    path,
+    permission="r",
+    duration=60 * 60 * 24 * 5,
+    content_type="application/zip",
+    endpoint_url=None,
+    bucket_name=None,
+):
     """
     Generate a signed URL (read or write) for the configured storage backend.
 
@@ -84,8 +91,10 @@ def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type
     assert permission in ("r", "w"), "SASSY urls only support read and write ('r' or 'w' permission)"
 
     if settings.STORAGE_IS_S3:
+        bucket_name = bucket_name or settings.AWS_STORAGE_PRIVATE_BUCKET_NAME
+
         # Remove the beginning of the URL (before bucket name) so we just have the path to the file
-        path = path.split(settings.AWS_STORAGE_PRIVATE_BUCKET_NAME)[-1]
+        path = path.split(bucket_name)[-1]
 
         # remove prepended slash
         if path.startswith("/"):
@@ -95,7 +104,7 @@ def make_url_sassy(path, permission="r", duration=60 * 60 * 24 * 5, content_type
         path = path.replace("+", " ")
 
         params = {
-            "Bucket": settings.AWS_STORAGE_PRIVATE_BUCKET_NAME,
+            "Bucket": bucket_name,
             "Key": path,
         }
 

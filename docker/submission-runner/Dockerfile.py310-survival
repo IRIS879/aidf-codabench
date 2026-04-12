@@ -14,4 +14,5 @@ RUN pip install --no-cache-dir \
     "pandas<3" \
     "scikit-learn<1.6" \
     "lifelines<0.31" \
-    "scikit-survival<0.24"
+    "scikit-survival<0.24" \
+    "statsmodels<1"

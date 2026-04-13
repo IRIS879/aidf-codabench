@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    "numpy==1.26.4" \
+    # NumPy 2.x improves compatibility for bundles serialized with newer RNG internals.
+    "numpy==2.0.2" \
     "pandas==2.3.3" \
     "scikit-learn==1.5.2" \
     "lifelines==0.30.0" \

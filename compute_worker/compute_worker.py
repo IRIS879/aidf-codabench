@@ -84,6 +84,29 @@ elif os.environ.get("CONTAINER_ENGINE_EXECUTABLE").lower() == "podman":
     )
 
 
+LEGACY_DEFAULT_RUNTIME_IMAGE = "codalab/codalab-legacy:py37"
+# Prefer generic override name, keep LEGACY_PY37_RUNTIME_IMAGE for backward compatibility.
+RUNTIME_IMAGE_OVERRIDE = (
+    os.environ.get("SUBMISSION_RUNTIME_IMAGE_OVERRIDE", "").strip()
+    or os.environ.get("LEGACY_PY37_RUNTIME_IMAGE", "").strip()
+)
+
+
+def resolve_submission_runtime_image(requested_image):
+    """
+    Allow local deployments to transparently override the legacy py37 runtime image
+    with a patched local image while leaving competition metadata unchanged.
+    """
+    if requested_image == LEGACY_DEFAULT_RUNTIME_IMAGE and RUNTIME_IMAGE_OVERRIDE:
+        logger.info(
+            "Overriding submission runtime image from %s to %s",
+            requested_image,
+            RUNTIME_IMAGE_OVERRIDE,
+        )
+        return RUNTIME_IMAGE_OVERRIDE
+    return requested_image
+
+
 # -----------------------------------------------
 # Show Progress bar on downloading images
 # -----------------------------------------------
@@ -359,7 +382,10 @@ class Run:
         self.user_pk = run_args["user_pk"]
         self.submission_id = run_args["id"]
         self.submissions_api_url = run_args["submissions_api_url"]
-        self.container_image = run_args["docker_image"]
+        self.requested_container_image = run_args["docker_image"]
+        self.container_image = resolve_submission_runtime_image(
+            self.requested_container_image
+        )
         self.secret = run_args["secret"]
         self.prediction_result = run_args["prediction_result"]
         self.scoring_result = run_args.get("scoring_result")

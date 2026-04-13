@@ -24,7 +24,8 @@ services:
   django:
     build: .
     # NOTE: We use watchmedo to reload gunicorn nicely, Uvicorn + Gunicorn reloads don't work well
-    command: bash -c "python manage.py collectstatic --noinput && cd /app/src && watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py"
+    # Ensure MEDIA_ROOT exists on fresh clones so file uploads have a writable target.
+    command: bash -c "mkdir -p /app/src/uploads && chmod 0777 /app/src/uploads && python manage.py collectstatic --noinput && cd /app/src && watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py"
     environment:
       - DATABASE_URL=postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
       - DJANGO_SETTINGS_MODULE=settings.develop
@@ -32,6 +33,7 @@ services:
     env_file: .env
     volumes:
       - .:/app:delegated
+      - django_uploads:/app/src/uploads
       - /tmp/codalab-v2/django:/codalab_tmp
       - ./backups:/app/backups
       - ./var/logs:/app/logs
@@ -105,6 +107,17 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+
+  #-----------------------------------------------
+  #   Local submission runtime for survival workloads on modern Python
+  #-----------------------------------------------
+  submission_runtime_py310_survival:
+    build:
+      context: .
+      dockerfile: docker/submission-runner/Dockerfile.py310-survival
+    image: aidf-codabench-submission-runtime:py310-survival
+    command: ["/bin/true"]
+    restart: "no"
 
 
   #-----------------------------------------------
@@ -191,7 +204,7 @@ services:
   #   Celery Service
   #-----------------------------------------------
   site_worker:
-    command: bash -c "watchmedo auto-restart -p '*.py' --recursive -- celery -A celery_config worker -B -Q site-worker -l info -n site-worker@%n --concurrency=2"
+    command: bash -c "mkdir -p /app/src/uploads && chmod 0777 /app/src/uploads && watchmedo auto-restart -p '*.py' --recursive -- celery -A celery_config worker -B -Q site-worker -l info -n site-worker@%n --concurrency=2"
     working_dir: /app/src
     build:
       context: .
@@ -207,6 +220,7 @@ services:
       - RABBITMQ_HOST=rabbit
     volumes:
       - .:/app
+      - django_uploads:/app/src/uploads
     restart: unless-stopped
     logging:
       options:
@@ -227,6 +241,7 @@ services:
     depends_on:
       - django
       - rabbit
+      - submission_runtime_py310_survival
     volumes:
       - ./compute_worker:/app
       - ${HOST_DIRECTORY:-/tmp/codabench}:/codabench
@@ -237,6 +252,8 @@ services:
       - BROKER_URL=pyamqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}//
       - QUEUE_STATIC=${QUEUE_STATIC:-compute-worker-static}
       - QUEUE_ROLLING=${QUEUE_ROLLING:-compute-worker-rolling}
+      # Keep competition docker_image unchanged; compute-worker maps legacy py37 to this runtime.
+      - SUBMISSION_RUNTIME_IMAGE_OVERRIDE=aidf-codabench-submission-runtime:py310-survival
       # Make the worker leave behind the submission so we can examine it
       - CODALAB_IGNORE_CLEANUP_STEP=1
       - COLUMNS=100
@@ -256,6 +273,7 @@ services:
     depends_on:
       - django
       - rabbit
+      - submission_runtime_py310_survival
     volumes:
       - ./compute_worker:/app
       - ${HOST_DIRECTORY:-/tmp/codabench}:/codabench
@@ -266,6 +284,8 @@ services:
       - BROKER_URL=pyamqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}//
       - QUEUE_STATIC=${QUEUE_STATIC:-compute-worker-static}
       - QUEUE_ROLLING=${QUEUE_ROLLING:-compute-worker-rolling}
+      # Keep competition docker_image unchanged; compute-worker maps legacy py37 to this runtime.
+      - SUBMISSION_RUNTIME_IMAGE_OVERRIDE=aidf-codabench-submission-runtime:py310-survival
       # Make the worker leave behind the submission so we can examine it
       - CODALAB_IGNORE_CLEANUP_STEP=1
       - COLUMNS=100
@@ -276,3 +296,4 @@ services:
         max-file: "5"
 volumes:
   minio_data:
+  django_uploads:

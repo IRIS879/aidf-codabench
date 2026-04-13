@@ -10,9 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    "numpy<2" \
-    "pandas<3" \
-    "scikit-learn<1.6" \
-    "lifelines<0.31" \
-    "scikit-survival<0.24" \
-    "statsmodels<1"
+    "numpy==1.26.4" \
+    "pandas==2.3.3" \
+    "scikit-learn==1.5.2" \
+    "lifelines==0.30.0" \
+    "scikit-survival==0.23.1" \
+    "statsmodels==0.14.6"

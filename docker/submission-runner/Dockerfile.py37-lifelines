@@ -1,8 +1,8 @@
 FROM codalab/codalab-legacy:py37
 
-RUN pip install --no-cache-dir \
-    "numpy<1.24" \
-    "pandas<2" \
-    "scikit-learn<1.1" \
-    "lifelines<0.28" \
-    "scikit-survival<0.20"
+# Keep this image minimal: survival submissions require lifelines + scikit-survival.
+# Pins target Python 3.7 compatibility in the legacy runtime.
+RUN pip install --no-cache-dir --upgrade "pip<24" "importlib-metadata<7" && \
+    pip install --no-cache-dir \
+        "lifelines==0.27.8" \
+        "scikit-survival==0.17.2"

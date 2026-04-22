@@ -1991,6 +1991,24 @@ class Run:
                     ]
                 )
 
+    def _load_output_scores_file(self):
+        scores_json_path = os.path.join(self.output_dir, "scores.json")
+        if os.path.exists(scores_json_path):
+            with open(scores_json_path) as scores_file:
+                try:
+                    return json.load(scores_file)
+                except json.decoder.JSONDecodeError as e:
+                    raise SubmissionException(
+                        f"Could not decode scores json properly, it contains an error.\n{e.msg}"
+                    )
+
+        scores_txt_path = os.path.join(self.output_dir, "scores.txt")
+        if os.path.exists(scores_txt_path):
+            with open(scores_txt_path) as scores_file:
+                return yaml.load(scores_file, yaml.Loader)
+
+        return None
+
     def _run_programs_once(
         self, program_dir, ingestion_program_dir, input_data_dir=None, input_ref_dir=None
     ):
@@ -2368,6 +2386,21 @@ class Run:
             loop.close()
             self._finalize_run_logs()
 
+        scoring_scores = self._load_output_scores_file()
+        if scoring_scores is None:
+            logger.warning(
+                "Rolling scoring program did not produce scores.json/scores.txt; "
+                "falling back to worker-computed AUC keys."
+            )
+            scoring_scores = {
+                "mean_yearly_auc": rolling_results.get("mean_yearly_auc"),
+                "overall_auc": rolling_results.get("overall_auc"),
+            }
+        elif not isinstance(scoring_scores, dict):
+            raise SubmissionException(
+                "Rolling scoring program scores must be a JSON/YAML object."
+            )
+
         final_scores = {
             "config": {
                 "rolling_start_period": first_eval,
@@ -2377,8 +2410,6 @@ class Run:
             },
             "static": static_results,
             "rolling": rolling_results,
-            "mean_yearly_auc": rolling_results.get("mean_yearly_auc"),
-            "overall_auc": rolling_results.get("overall_auc"),
             "yearly_scores": [
                 {
                     "year": row.get("period", row.get("year")),
@@ -2388,6 +2419,7 @@ class Run:
                 for row in rolling_results.get("yearly_auc", [])
             ],
         }
+        final_scores.update(scoring_scores)
         self.combined_scores = final_scores
 
     def _put_dir(self, url, directory):

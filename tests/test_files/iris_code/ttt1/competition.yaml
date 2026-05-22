@@ -1,0 +1,89 @@
+# Competition YAML file : general challenge definition and settings
+# V1-Dictionary Specification (Fixes list indices must be integers error)
+
+title: Iris
+admin_names: guyon,lsenta,pavao
+allow_public_submissions: true
+allow_teams: false
+anonymous_leaderboard: false
+description: The well known Iris dataset from Fisher's classic paper (Fisher, 1936).
+start_date: 2020-01-01 00:00:00+00:00
+competition_docker_image: 'codalab/codalab-legacy:py37'
+disallow_leaderboard_modifying: true
+enable_detailed_results: true
+enable_forum: true
+enable_per_submission_metadata: false
+end_date: null
+force_submission_to_leaderboard: true
+has_registration: false
+show_datasets_from_yaml: true
+
+# =========================================================================
+# AIDF Platform Custom Extensions
+# =========================================================================
+training_mode: static                       # 使用静态传统的评测模式
+enable_model_card_submission: true          # 开启模型卡片合规表单收集
+period_col: ""                              
+rolling_period_bounds: ""                   
+# =========================================================================
+
+# Documentation pages
+html:
+  data: data.html
+  evaluation: evaluation.html
+  overview: overview.html
+  terms: terms.html
+image: logo.png
+
+# Leaderboard Definition (⚠️ 恢复为纯正的字典结构加锚点，彻底解决字符串索引 List 报错)
+leaderboard:
+  leaderboards:
+    main_leaderboard: &RESULTS
+      label: Results
+      rank: 1
+  columns:
+    score:
+      leaderboard: *RESULTS
+      label: Score
+      numeric_format: 4
+      rank: 1
+
+# Phases (Maintained as Dict format for .values() and containing 'label' for Unpacker)
+phases:
+  1:                                        # 满足 Unpacker 的 .values() 遍历需求
+    name: Development
+    label: Development                       # 满足 KeyError: 'label' 的要求
+    description: 'Development phase: create models and submit them or directly submit results on validation and/or test data; feed-back are provided on the validation set only.'
+    phasenumber: 1
+    color: green
+    start_date: 2020-01-15 18:53:00+00:00
+    end_date: null
+    execution_time_limit: 500
+    max_submissions: 100
+    max_submissions_per_day: 15
+    is_scoring_only: false
+    ingestion_program: ingestion_program.zip
+    input_data: input_data_1_2.zip
+    public_data: input_data_1_2.zip
+    reference_data: reference_data_1.zip
+    scoring_program: scoring_program.zip
+    starting_kit: starting_kit.zip
+    leaderboard: main_leaderboard           # 显式关联上面的唯一 KEY，防止前端 NoneType 报错
+
+  2:                                        # 满足 Unpacker 的 .values() 遍历需求
+    name: Prediction Output hidden
+    label: Prediction Output hidden          # 满足 KeyError: 'label' 的要求
+    description: 'Final phase: submissions from the previous phase are automatically cloned and used to compute the final score. The results on the test set will be revealed when the organizers make them available.'
+    phasenumber: 2
+    color: purple
+    start_date: 2020-02-15 18:53:00+00:00
+    end_date: null
+    execution_time_limit: 500
+    max_submissions: 100
+    max_submissions_per_day: 5
+    is_scoring_only: false
+    ingestion_program: ingestion_program.zip
+    input_data: input_data_1_2.zip
+    reference_data: reference_data_2.zip
+    scoring_program: scoring_program.zip
+    leaderboard: main_leaderboard           # 显式关联上面的唯一 KEY，防止前端 NoneType 报错

@@ -909,23 +909,23 @@ class Run:
 
     def _get_host_path(self, *paths):
         """Turns an absolute path inside our container, into what the path
-        would be on the host machine. We also ensure that the directory exists,
-        docker will create if necessary, but other container engines such as
-        podman may not."""
-        # Take our list of paths and smash 'em together
-        path = os.path.join(*paths)
+        would be on the host machine."""
+        # 强制使用正斜杠拼接，避免 Windows/Linux 路径分隔符冲突
+        path = "/".join(paths) 
 
-        # pull front of path, which points to the location inside the container
+        # 剥离前半部分，指向容器内的位置
         path = path[len(BASE_DIR) :]
 
-        # add host to front, so when we run commands in the container on the host they
-        # can be seen properly
-        path = os.path.join(HOST_DIRECTORY, path)
+        # 确保 HOST_DIRECTORY 结尾带有斜杠，以便安全拼接
+        safe_host_directory = HOST_DIRECTORY if HOST_DIRECTORY.endswith('/') else HOST_DIRECTORY + '/'
+        
+        # 手动拼接，避免 os.path.join 在 Linux 容器内弄乱 Windows 盘符
+        final_path = safe_host_directory + path
 
-        # Create if necessary
-        os.makedirs(path, exist_ok=True)
+        # 创建目录
+        os.makedirs(os.path.normpath(final_path), exist_ok=True)
 
-        return path
+        return final_path
 
     async def _run_program_directory(
         self, program_dir, kind, input_data_dir=None, input_ref_dir=None
@@ -2078,14 +2078,23 @@ class Run:
             loop.close()
 
     def _sync_predictions_to_input_res(self):
-        pred_path = self._find_submission_file()
-        if not pred_path:
-            logger.warning("No predictions file found to stage in input/res.")
-            return
         res_dir = os.path.join(self.input_dir, "res")
         os.makedirs(res_dir, exist_ok=True)
-        dst_path = os.path.join(res_dir, "predictions.csv")
-        shutil.copy2(pred_path, dst_path)
+
+        # Copy every file the ingestion produced to input/res so the scoring
+        # program can find them regardless of format (.predict, .csv, etc.).
+        copied = []
+        if os.path.isdir(self.output_dir):
+            for filename in os.listdir(self.output_dir):
+                src = os.path.join(self.output_dir, filename)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(res_dir, filename))
+                    copied.append(filename)
+
+        if not copied:
+            logger.warning("No predictions file found to stage in input/res.")
+        else:
+            logger.info("Staged %d prediction file(s) to input/res: %s", len(copied), copied)
 
     def _finalize_run_logs(self):
         self.watch = False
@@ -2507,10 +2516,15 @@ class Run:
         ]
         if self.is_scoring:
             # Send along submission result so scoring_program can get access
-            if self.rolling_enabled and self.submission_data:
+            
+            # --- 修复：绝对优先下载选手代码 ---
+            if self.submission_data:
+                bundles += [(self.submission_data, "input/res")]
+            elif self.rolling_enabled and self.submission_data:
                 bundles += [(self.submission_data, "input/res")]
             else:
                 bundles += [(self.prediction_result, "input/res")]
+            # -------------------------------------
 
         for url, path in bundles:
             if url is not None:
@@ -2704,6 +2718,10 @@ class Run:
             prog_status["staticSplitValue"] = self.static_split_value
 
         logger.info(f"Metadata output: {prog_status}")
+
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir, exist_ok=True)
+        # ------------------------------------------------------
 
         metadata_path = os.path.join(self.output_dir, "metadata")
 

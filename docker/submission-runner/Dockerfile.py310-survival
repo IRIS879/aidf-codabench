@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir \
     # NumPy 2.x improves compatibility for bundles serialized with newer RNG internals.
     "numpy==2.0.2" \
     "pandas==2.3.3" \
-    "scikit-learn==1.5.2" \
+    "scikit-learn==1.8.0" \
     "lifelines==0.30.0" \
     "scikit-survival==0.23.1" \
     "statsmodels==0.14.6"

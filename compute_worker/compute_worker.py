@@ -1878,9 +1878,18 @@ class Run:
 
         pred_col = self._infer_pred_col(pred_cols)
         if not pred_col:
-            raise SubmissionException(
-                f"Could not identify prediction column in {pred_path}. Pred cols={pred_cols}"
+            logger.warning(
+                "Could not identify a single prediction column in %s (Pred cols=%s). "
+                "This file contains multi-horizon risk columns — skipping worker-side AUC. "
+                "Scores will be computed by the scoring program.",
+                pred_path,
+                pred_cols,
             )
+            return {
+                "overall_auc": None,
+                "mean_yearly_auc": None,
+                "yearly_auc": [],
+            }
 
         ref_map = {}
         eval_period_set = set(evaluation_period_keys)

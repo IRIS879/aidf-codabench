@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import pandas as pd; df = pd.read_csv\\('C:/Users/Try/Documents/GitHub/survival-analysis-models-/Task Creation on Codabench/input_data/features.csv'\\); print\\('Shape:', df.shape\\); print\\('Columns:', list\\(df.columns[:10]\\), '...'\\); print\\(df.head\\(3\\)\\)\")",
+      "Bash(docker compose *)"
+    ]
+  }
+}

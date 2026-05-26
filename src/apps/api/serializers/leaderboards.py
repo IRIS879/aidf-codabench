@@ -1,4 +1,4 @@
-from django.db.models import Sum, Q
+from django.db.models import F, Sum, Q
 from drf_writable_nested import WritableNestedModelSerializer
 from rest_framework import serializers
 
@@ -9,6 +9,46 @@ from leaderboards.models import Leaderboard, Column
 
 from .fields import CharacterSeparatedField
 from .tasks import PhaseTaskInstanceSerializer
+
+
+def _order_submissions_by_score(queryset, leaderboard):
+    """
+    Annotate *queryset* with per-column scores and return it ordered by the
+    leaderboard's primary column first (nulls last), then every secondary
+    visible column (nulls last), then newest submission as a tiebreaker.
+
+    Both LeaderboardEntriesSerializer and LeaderboardPhaseSerializer share
+    this logic; callers are responsible for the initial filtering.
+    """
+    primary_col = leaderboard.columns.get(index=leaderboard.primary_index)
+
+    if primary_col.sorting == "desc":
+        primary_order = F('primary_col').desc(nulls_last=True)
+    else:
+        primary_order = F('primary_col').asc(nulls_last=True)
+
+    ordering = [primary_order]
+    queryset = queryset.annotate(
+        primary_col=Sum('scores__score', filter=Q(scores__column=primary_col))
+    )
+
+    secondary_cols = (
+        leaderboard.columns
+        .filter(hidden=False)
+        .exclude(id=primary_col.id)
+        .order_by('index')
+    )
+    for column in secondary_cols:
+        col_name = f'col{column.index}'
+        if column.sorting == "desc":
+            ordering.append(F(col_name).desc(nulls_last=True))
+        else:
+            ordering.append(F(col_name).asc(nulls_last=True))
+        queryset = queryset.annotate(
+            **{col_name: Sum('scores__score', filter=Q(scores__column__index=column.index))}
+        )
+
+    return queryset.order_by(*ordering, '-created_when')
 
 
 class ColumnSerializer(WritableNestedModelSerializer):
@@ -98,30 +138,14 @@ class LeaderboardEntriesSerializer(serializers.ModelSerializer):
         )
 
     def get_submissions(self, instance):
-        # desc == -colname
-        # asc == colname
-        primary_col = instance.columns.get(index=instance.primary_index)
-        # Order first by primary column. Then order by other columns after for tie breakers.
-        ordering = [f'{"-" if primary_col.sorting == "desc" else ""}primary_col']
-        submissions = (
-            Submission.objects.filter(
-                leaderboard=instance,
-                is_specific_task_re_run=False
-            )
+        qs = (
+            Submission.objects.filter(leaderboard=instance, is_specific_task_re_run=False)
             .select_related('owner')
-            .prefetch_related('scores')
-            .annotate(primary_col=Sum('scores__score', filter=Q(scores__column=primary_col)))
+            .prefetch_related('scores', 'scores__column')
         )
-        for column in instance.columns.exclude(id=primary_col.id).order_by('index'):
-            col_name = f'col{column.index}'
-            ordering.append(f'{"-" if column.sorting == "desc" else ""}{col_name}')
-            kwargs = {
-                col_name: Sum('scores__score', filter=Q(scores__column__index=column.index))
-            }
-            submissions = submissions.annotate(**kwargs)
-
-        submissions = submissions.order_by(*ordering, 'created_when')
-        return SubmissionLeaderBoardSerializer(submissions, many=True).data
+        return SubmissionLeaderBoardSerializer(
+            _order_submissions_by_score(qs, instance), many=True
+        ).data
 
 
 class LeaderboardPhaseSerializer(serializers.ModelSerializer):
@@ -154,11 +178,7 @@ class LeaderboardPhaseSerializer(serializers.ModelSerializer):
         depth = 1
 
     def get_submissions(self, instance):
-        # desc == -colname
-        # asc == colname
-        primary_col = instance.leaderboard.columns.get(index=instance.leaderboard.primary_index)
-        ordering = [f'{"-" if primary_col.sorting == "desc" else ""}primary_col']
-        submissions = (
+        qs = (
             Submission.objects.filter(
                 phase=instance,
                 is_soft_deleted=False,
@@ -168,20 +188,7 @@ class LeaderboardPhaseSerializer(serializers.ModelSerializer):
             )
             .select_related('owner')
             .prefetch_related('scores', 'scores__column')
-            .annotate(primary_col=Sum('scores__score', filter=Q(scores__column=primary_col)))
         )
-        for column in (
-            instance.leaderboard.columns
-            .filter(hidden=False)
-            .exclude(id=primary_col.id)
-            .order_by('index')
-        ):
-            col_name = f'col{column.index}'
-            ordering.append(f'{"-" if column.sorting == "desc" else ""}{col_name}')
-            kwargs = {
-                col_name: Sum('scores__score', filter=Q(scores__column__index=column.index))
-            }
-            submissions = submissions.annotate(**kwargs)
-
-        submissions = submissions.order_by(*ordering, 'created_when')
-        return SubmissionLeaderBoardSerializer(submissions, many=True).data
+        return SubmissionLeaderBoardSerializer(
+            _order_submissions_by_score(qs, instance.leaderboard), many=True
+        ).data

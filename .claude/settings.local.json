@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import pandas as pd; df = pd.read_csv\\('C:/Users/Try/Documents/GitHub/survival-analysis-models-/Task Creation on Codabench/input_data/features.csv'\\); print\\('Shape:', df.shape\\); print\\('Columns:', list\\(df.columns[:10]\\), '...'\\); print\\(df.head\\(3\\)\\)\")",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(git stash *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\nContent-Type: %{content_type}\\\\n\" \"http://localhost/api/submissions/28/model-card/download/?dl=pdf\")",
+      "Bash(curl -s \"http://localhost/api/phases/35/get_leaderboard/\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost/api/phases/35/get_leaderboard/\")"
     ]
   }
 }

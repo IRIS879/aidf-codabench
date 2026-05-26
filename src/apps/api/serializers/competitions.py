@@ -262,7 +262,6 @@ class CompetitionSerializer(DefaultUserCreateMixin, WritableNestedModelSerialize
             'model_card_is_public',
             'model_card_template_json',
             'leaderboard_use_model_name',
-            'forum_enabled'
         )
 
     # ------------------------------------------------------------
@@ -515,7 +514,6 @@ class CompetitionDetailSerializer(serializers.ModelSerializer):
             'model_card_is_public',
             'model_card_template_json',
             'leaderboard_use_model_name',
-            'forum_enabled'
         )
 
     def get_leaderboards(self, instance):

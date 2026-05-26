@@ -25,6 +25,7 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
     created_when = serializers.DateTimeField()
     model_name = serializers.SerializerMethodField()
     model_card_url = serializers.SerializerMethodField()
+    has_model_card = serializers.SerializerMethodField()
 
     class Meta:
         model = Submission
@@ -43,6 +44,7 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
             'created_when',
             'model_name',
             'model_card_url',
+            'has_model_card',
         )
 
     def get_display_name(self, obj):
@@ -63,41 +65,39 @@ class SubmissionLeaderBoardSerializer(serializers.ModelSerializer):
 
         return 'Model'
 
+    def _model_card_visible(self, obj):
+        """Return True if the requesting user is allowed to see model card data."""
+        competition = getattr(getattr(obj, 'phase', None), 'competition', None)
+        if not competition:
+            return False
+        if getattr(competition, 'model_card_is_public', False):
+            return True
+        user = getattr(self.context.get('request'), 'user', None)
+        return bool(
+            user
+            and getattr(user, 'is_authenticated', False)
+            and competition.user_has_admin_permission(user)
+        )
+
+    def get_has_model_card(self, obj):
+        """True when model card data exists AND the current user may access it."""
+        has_data = bool(
+            (obj.model_card_file and obj.model_card_file.name)
+            or getattr(obj, 'model_card_parsed_json', None)
+        )
+        return has_data and self._model_card_visible(obj)
+
     def get_model_card_url(self, obj):
         if not (obj.model_card_file and obj.model_card_file.name):
             return None
-
-        competition = getattr(getattr(obj, 'phase', None), 'competition', None)
-        request = self.context.get('request') if hasattr(self, 'context') else None
-        user = getattr(request, 'user', None)
-
-        # Public => everyone can see
-        if competition and getattr(competition, 'model_card_is_public', False):
-            try:
-                bucket_name = getattr(obj.model_card_file.storage, "bucket_name", None)
-                return make_url_sassy(
-                    obj.model_card_file.name,
-                    endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
-                    bucket_name=bucket_name,
-                )
-            except Exception:
-                return None
-
-        # Private => only organizer/admin can see
-        if (
-            competition
-            and user
-            and getattr(user, 'is_authenticated', False)
-            and competition.user_has_admin_permission(user)
-        ):
-            try:
-                bucket_name = getattr(obj.model_card_file.storage, "bucket_name", None)
-                return make_url_sassy(
-                    obj.model_card_file.name,
-                    endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
-                    bucket_name=bucket_name,
-                )
-            except Exception:
-                return None
-
-        return None
+        if not self._model_card_visible(obj):
+            return None
+        try:
+            bucket_name = getattr(obj.model_card_file.storage, "bucket_name", None)
+            return make_url_sassy(
+                obj.model_card_file.name,
+                endpoint_url=settings.AWS_S3_BROWSER_ENDPOINT_URL or None,
+                bucket_name=bucket_name,
+            )
+        except Exception:
+            return None

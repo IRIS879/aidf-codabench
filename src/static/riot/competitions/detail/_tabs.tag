@@ -367,31 +367,54 @@
 
             // Need to run update() to build tags to render html in
             self.update()
-            _.forEach(self.competition.pages, (page, index) => {
 
-                // Render html pages
-                const rendered_content = renderMarkdownWithLatex(page.content)
-                $(`#page_${index}`)[0].innerHTML = ""
-                rendered_content.forEach(node => {
-                    $(`#page_${index}`)[0].appendChild(node.cloneNode(true)); // Append each node
-                });
-
-            })
-            if(self.competition_has_no_terms_page()){
-                const rendered_content = renderMarkdownWithLatex(self.competition.terms)
-                $(`#page_term`)[0].innerHTML = ""
-                rendered_content.forEach(node => {
-                    $(`#page_term`)[0].appendChild(node.cloneNode(true)); // Append each node
-                });
+            try {
+                _.forEach(self.competition.pages, (page, index) => {
+                    // Render html pages
+                    const rendered_content = renderMarkdownWithLatex(page.content)
+                    const page_el = $(`#page_${index}`)[0]
+                    if (page_el) {
+                        page_el.innerHTML = ""
+                        rendered_content.forEach(node => {
+                            page_el.appendChild(node.cloneNode(true)) // Append each node
+                        })
+                    }
+                })
+            } catch (e) {
+                console.error('[comp-tabs] Error rendering page content:', e)
             }
-            _.forEach(self.competition.phases, (phase, index) => {
-                // Render phase description
-                const rendered_content = renderMarkdownWithLatex(phase.description)
-                $(`#phase_${index}`)[0].innerHTML = ""
-                rendered_content.forEach(node => {
-                    $(`#phase_${index}`)[0].appendChild(node.cloneNode(true)); // Append each node
-                });
-            })
+
+            try {
+                if (self.competition_has_no_terms_page()) {
+                    const rendered_content = renderMarkdownWithLatex(self.competition.terms)
+                    const term_el = $(`#page_term`)[0]
+                    if (term_el) {
+                        term_el.innerHTML = ""
+                        rendered_content.forEach(node => {
+                            term_el.appendChild(node.cloneNode(true)) // Append each node
+                        })
+                    }
+                }
+            } catch (e) {
+                console.error('[comp-tabs] Error rendering terms:', e)
+            }
+
+            try {
+                _.forEach(self.competition.phases, (phase, index) => {
+                    // Render phase description
+                    const rendered_content = renderMarkdownWithLatex(phase.description)
+                    const phase_el = $(`#phase_${index}`)[0]
+                    if (phase_el) {
+                        phase_el.innerHTML = ""
+                        rendered_content.forEach(node => {
+                            phase_el.appendChild(node.cloneNode(true)) // Append each node
+                        })
+                    }
+                })
+            } catch (e) {
+                console.error('[comp-tabs] Error rendering phase descriptions:', e)
+            }
+
             _.delay(() => {
                 self.loading = false
                 self.update()

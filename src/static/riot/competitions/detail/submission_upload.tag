@@ -8,18 +8,34 @@
                 </div>
             </div>
 
-            <div class="ui segment" style="margin-top: 16px;">
-                <div style="font-weight: 600; margin-bottom: 6px;">Model Card Template</div>
+            <div class="ui segment" style="margin-top: 16px;" if="{ opts.competition && opts.competition.enable_model_card_submission }">
+                <div style="font-weight: 600; margin-bottom: 6px;">Model Card Templates</div>
                 <div style="margin-bottom: 12px; color: rgba(0,0,0,.6);">
-                    Please use the official template to prepare your model card before uploading.
+                    Download a template to prepare your model card, or simply fill in the form below.
                 </div>
                 <a class="ui button"
-                   style="background:#e0e1e2; color:rgba(0,0,0,.6);"
+                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
                    href="/static/model-cards/model_card_template.docx"
                    target="_blank"
                    rel="noopener noreferrer">
                     <i class="download icon"></i>
-                    Download Model Card Template
+                    DOCX Template
+                </a>
+                <a class="ui button"
+                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
+                   href="/static/model-cards/model_card_template.json"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    <i class="download icon"></i>
+                    JSON Template
+                </a>
+                <a class="ui button"
+                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
+                   href="/static/model-cards/model_card_template.md"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    <i class="download icon"></i>
+                    Markdown Template
                 </a>
             </div>
 
@@ -81,14 +97,59 @@
                         </input-file>
                     </div>
 
-                    <div class="upload-block">
-                        <label class="upload-label">Model Card PDF</label>
-                        <input-file
-                            name="model_card_file"
-                            ref="model_card_file"
-                            error="{errors.model_card_file}"
-                            accept=".pdf,application/pdf">
-                        </input-file>
+                    <!-- Model card section — only shown when the competition requires it -->
+                    <div class="upload-block model-card-block" if="{ opts.competition && opts.competition.enable_model_card_submission }">
+                        <label class="upload-label">
+                            Model Card
+                            <span class="mc-required-star">*</span>
+                        </label>
+
+                        <!-- Tab switcher -->
+                        <div class="ui secondary pointing menu mc-tab-menu">
+                            <a class="item { active: mc_mode === 'form' }"
+                               onclick="{ set_mc_mode_form }">
+                                Fill Form
+                            </a>
+                            <a class="item { active: mc_mode === 'upload' }"
+                               onclick="{ set_mc_mode_upload }">
+                                Upload File
+                            </a>
+                        </div>
+
+                        <!-- Form fill mode -->
+                        <div class="mc-panel" if="{ mc_mode === 'form' }">
+                            <div class="mc-field">
+                                <label>Model Name <span class="mc-required-star">*</span></label>
+                                <input class="mc-input" type="text" ref="mc_model_name" placeholder="e.g. Cox-PH Baseline">
+                            </div>
+                            <div class="mc-field">
+                                <label>Task <span class="mc-required-star">*</span></label>
+                                <input class="mc-input" type="text" ref="mc_task" placeholder="e.g. Survival prediction">
+                            </div>
+                            <div class="mc-field">
+                                <label>Output <span class="mc-required-star">*</span></label>
+                                <input class="mc-input" type="text" ref="mc_output" placeholder="e.g. Risk score per horizon (1–60 months)">
+                            </div>
+                            <div class="mc-field">
+                                <label>Overview <span class="mc-required-star">*</span></label>
+                                <textarea class="mc-textarea" ref="mc_overview" rows="4"
+                                    placeholder="Briefly describe the purpose of the model and the problem it is designed to solve."></textarea>
+                            </div>
+                            <div class="mc-error" if="{ errors.model_card_form_data }">{ errors.model_card_form_data }</div>
+                        </div>
+
+                        <!-- File upload mode -->
+                        <div class="mc-panel" if="{ mc_mode === 'upload' }">
+                            <div style="font-size:12px; color:rgba(0,0,0,.5); margin-bottom:6px;">
+                                Accepted formats: .pdf &nbsp;·&nbsp; .json &nbsp;·&nbsp; .md / .markdown
+                            </div>
+                            <input-file
+                                name="model_card_file"
+                                ref="model_card_file"
+                                error="{errors.model_card_file}"
+                                accept=".pdf,application/pdf,.json,.md,.markdown">
+                            </input-file>
+                        </div>
                     </div>
                 </div>
 
@@ -182,6 +243,19 @@
     self.detailed_result_urls = {}
     self.is_submitting = false
 
+    // 'form' = fill-in-page, 'upload' = file upload
+    self.mc_mode = 'form'
+
+    self.set_mc_mode_form = function () {
+        self.mc_mode = 'form'
+        self.update()
+    }
+
+    self.set_mc_mode_upload = function () {
+        self.mc_mode = 'upload'
+        self.update()
+    }
+
     self.on("mount", function () {
         console.log("[submission-upload] mounted")
         console.log("[submission-upload] opts.competition =", opts.competition)
@@ -217,6 +291,12 @@
         if (model_card_input) {
             model_card_input.value = ''
         }
+
+        // Clear model card form fields
+        if (self.refs.mc_model_name) self.refs.mc_model_name.value = ''
+        if (self.refs.mc_task)       self.refs.mc_task.value = ''
+        if (self.refs.mc_output)     self.refs.mc_output.value = ''
+        if (self.refs.mc_overview)   self.refs.mc_overview.value = ''
 
         self.errors = {}
         self.update()
@@ -296,10 +376,35 @@
             self.errors.data_file = "Prediction file must be a .zip"
         }
 
-        if (!model_card_file) {
-            self.errors.model_card_file = "Please select a model card PDF"
-        } else if (!model_card_file.name.toLowerCase().endsWith('.pdf')) {
-            self.errors.model_card_file = "Model card file must be a .pdf"
+        var mc_required = opts.competition && opts.competition.enable_model_card_submission
+        if (mc_required) {
+            if (self.mc_mode === 'upload') {
+                // File upload mode
+                if (!model_card_file) {
+                    self.errors.model_card_file = "Please select a model card file"
+                } else {
+                    var mc_name = model_card_file.name.toLowerCase()
+                    var mc_ok = mc_name.endsWith('.pdf') || mc_name.endsWith('.json') ||
+                                mc_name.endsWith('.md') || mc_name.endsWith('.markdown')
+                    if (!mc_ok) {
+                        self.errors.model_card_file = "Accepted: .pdf, .json, .md, .markdown"
+                    }
+                }
+            } else {
+                // Form fill mode
+                var mc_model_name = self.refs.mc_model_name ? self.refs.mc_model_name.value.trim() : ''
+                var mc_task       = self.refs.mc_task       ? self.refs.mc_task.value.trim()       : ''
+                var mc_output     = self.refs.mc_output     ? self.refs.mc_output.value.trim()     : ''
+                var mc_overview   = self.refs.mc_overview   ? self.refs.mc_overview.value.trim()   : ''
+                var mc_missing = []
+                if (!mc_model_name) mc_missing.push('Model Name')
+                if (!mc_task)       mc_missing.push('Task')
+                if (!mc_output)     mc_missing.push('Output')
+                if (!mc_overview)   mc_missing.push('Overview')
+                if (mc_missing.length) {
+                    self.errors.model_card_form_data = "Please fill in: " + mc_missing.join(', ')
+                }
+            }
         }
 
         if (opts.fact_sheet) {
@@ -325,6 +430,7 @@
         console.log("[submission-upload] phase id =", self.selected_phase && self.selected_phase.id)
         console.log("[submission-upload] prediction filename =", prediction_file && prediction_file.name)
         console.log("[submission-upload] model card filename =", model_card_file && model_card_file.name)
+        console.log("[submission-upload] mc_mode =", self.mc_mode)
 
         self.upload()
     }
@@ -342,15 +448,16 @@
             var model_card_input = self.refs.model_card_file && self.refs.model_card_file.refs ? self.refs.model_card_file.refs.file_input : null
             var model_card_file = model_card_input && model_card_input.files ? model_card_input.files[0] : null
 
+            var mc_required = opts.competition && opts.competition.enable_model_card_submission
+
             console.log("[submission-upload] upload prediction_input =", prediction_input)
             console.log("[submission-upload] upload prediction_file =", prediction_file)
             console.log("[submission-upload] upload prediction size =", prediction_file ? prediction_file.size : null)
             console.log("[submission-upload] upload prediction type =", prediction_file ? prediction_file.type : null)
-
+            console.log("[submission-upload] upload mc_required =", mc_required)
+            console.log("[submission-upload] upload mc_mode =", self.mc_mode)
             console.log("[submission-upload] upload model_card_input =", model_card_input)
             console.log("[submission-upload] upload model_card_file =", model_card_file)
-            console.log("[submission-upload] upload model_card size =", model_card_file ? model_card_file.size : null)
-            console.log("[submission-upload] upload model_card type =", model_card_file ? model_card_file.type : null)
 
             if (!prediction_file) {
                 console.error("[submission-upload] No prediction file found inside upload()")
@@ -360,12 +467,28 @@
                 return
             }
 
-            if (!model_card_file) {
-                console.error("[submission-upload] No model card file found inside upload()")
-                self.errors.model_card_file = "Please select a model card PDF"
-                self.is_submitting = false
-                self.update()
-                return
+            var mc_form_data_json = null
+            if (mc_required && self.mc_mode === 'form') {
+                // Build form data from input refs
+                var mc_model_name = self.refs.mc_model_name ? self.refs.mc_model_name.value.trim() : ''
+                var mc_task       = self.refs.mc_task       ? self.refs.mc_task.value.trim()       : ''
+                var mc_output_val = self.refs.mc_output     ? self.refs.mc_output.value.trim()     : ''
+                var mc_overview   = self.refs.mc_overview   ? self.refs.mc_overview.value.trim()   : ''
+                mc_form_data_json = JSON.stringify({
+                    model_name: mc_model_name,
+                    task:       mc_task,
+                    output:     mc_output_val,
+                    overview:   mc_overview
+                })
+                console.log("[submission-upload] upload mc_form_data_json =", mc_form_data_json)
+            } else if (mc_required && self.mc_mode === 'upload') {
+                if (!model_card_file) {
+                    console.error("[submission-upload] No model card file found inside upload()")
+                    self.errors.model_card_file = "Please select a model card file"
+                    self.is_submitting = false
+                    self.update()
+                    return
+                }
             }
 
             var timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -396,7 +519,13 @@
                     var formData = new FormData()
                     formData.append('data', dataset.key)
                     formData.append('phase', self.selected_phase.id)
-                    formData.append('model_card_file', model_card_file)
+
+                    // Attach model card payload (file or form data)
+                    if (mc_form_data_json) {
+                        formData.append('model_card_form_data', mc_form_data_json)
+                    } else if (model_card_file) {
+                        formData.append('model_card_file', model_card_file)
+                    }
 
                     var fact_sheet_answers = self.collect_fact_sheet_answers()
                     if (opts.fact_sheet && Object.keys(fact_sheet_answers).length > 0) {
@@ -416,6 +545,7 @@
                     console.log("[submission-upload] dataset key =", dataset.key)
                     console.log("[submission-upload] model_card_file =", model_card_file ? model_card_file.name : null)
                     console.log("[submission-upload] model_card_size =", model_card_file ? model_card_file.size : null)
+                    console.log("[submission-upload] mc_form_data =", mc_form_data_json ? "(form)" : "(none)")
 
                     try {
                         for (var pair of formData.entries()) {
@@ -609,6 +739,60 @@
     font-size 14px
     font-weight 600
     margin-bottom .5em
+
+.model-card-block
+    margin-top 1.5em
+    padding 1em 1.2em
+    border 1px solid #e0e1e2
+    border-radius 4px
+    background #fafafa
+
+.mc-required-star
+    color #db2828
+    margin-left 2px
+
+.mc-tab-menu
+    margin-bottom .8em !important
+    font-size 13px
+
+.mc-panel
+    padding-top .5em
+
+.mc-field
+    margin-bottom .8em
+
+    label
+        font-size 13px
+        font-weight 600
+        display block
+        margin-bottom 3px
+        color rgba(0,0,0,.75)
+
+.mc-input
+    width 100%
+    padding 6px 8px
+    border 1px solid rgba(34,36,38,.15)
+    border-radius 3px
+    font-size 13px
+    outline none
+    &:focus
+        border-color #85b7d9
+
+.mc-textarea
+    width 100%
+    padding 6px 8px
+    border 1px solid rgba(34,36,38,.15)
+    border-radius 3px
+    font-size 13px
+    resize vertical
+    outline none
+    &:focus
+        border-color #85b7d9
+
+.mc-error
+    color #db2828
+    font-size 12px
+    margin-top 4px
 
 #submission-output
     .submission-tabs

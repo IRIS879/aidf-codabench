@@ -891,6 +891,7 @@ class PhaseViewSet(ModelViewSet):
                     'created_when': submission['created_when'],
                     'model_name': submission.get('model_name'),
                     'model_card_url': submission.get('model_card_url'),
+                    'has_model_card': submission.get('has_model_card', False),
                 })
             for score in submission['scores']:
 

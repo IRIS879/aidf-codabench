@@ -1,13 +1,36 @@
 <leaderboards>
-  <div class="ui left action input" style="margin-top: 32px; width: 33%">
-    <button type="button" class="ui icon button" id="search-leaderboard-button">
-      <i class="search icon"></i>
-    </button>
-    <input ref="leaderboardFilter" type="text" placeholder="Filter Leaderboard by Columns" />
+  <div class="lb-toolbar">
+    <div class="ui left action input lb-search">
+      <button type="button" class="ui icon button" id="search-leaderboard-button">
+        <i class="search icon"></i>
+      </button>
+      <input ref="leaderboardFilter" type="text" placeholder="Filter Leaderboard by Columns" />
+    </div>
+    <a data-tooltip="Start typing to filter columns under 'Filter Leaderboard by Columns'" data-position="right center">
+      <i class="question circle icon"></i>
+    </a>
+
+    <div class="lb-sort-group">
+      <span class="lb-sort-label">Sort by</span>
+      <div class="ui small buttons">
+        <button
+          type="button"
+          class="ui button { active: sort_mode === 'score' }"
+          onclick="{ set_sort_score }"
+          title="Sort by primary score">
+          <i class="sort amount down icon"></i> Score
+        </button>
+        <div class="or"></div>
+        <button
+          type="button"
+          class="ui button { active: sort_mode === 'time' }"
+          onclick="{ set_sort_time }"
+          title="Sort by submission time (newest first)">
+          <i class="clock icon"></i> Time
+        </button>
+      </div>
+    </div>
   </div>
-  <a data-tooltip="Start typing to filter columns under 'Filter Leaderboard by Columns'" data-position="right center">
-    <i class="question circle icon"></i>
-  </a>
 
   <div class="ui segment" style="margin-top: 16px;">
     <table class="ui celled table coda-animated">
@@ -20,7 +43,15 @@
         </tr>
 
         <tr>
-          <th class="center aligned">#</th>
+          <th class="center aligned">
+            #
+            <span class="lb-sort-indicator" if="{ sort_mode === 'score' }" title="Sorted by score">
+              <i class="sort amount down icon"></i>
+            </span>
+            <span class="lb-sort-indicator" if="{ sort_mode === 'time' }" title="Sorted by time">
+              <i class="clock icon"></i>
+            </span>
+          </th>
           <th>{ model_header }</th>
           <th>Date</th>
           <th>ID</th>
@@ -58,11 +89,34 @@
           <td>{ pretty_date(submission.created_when) }</td>
           <td>{ submission.id }</td>
 
-          <td class="center aligned">
-            <a if="{ submission.model_card_url }" href="{ submission.model_card_url }" target="_blank" rel="noopener">
-              View
+          <td class="center aligned model-card-cell">
+            <!-- Original uploaded file link (file-upload mode) -->
+            <a if="{ submission.model_card_url }"
+               href="{ submission.model_card_url }"
+               target="_blank"
+               rel="noopener"
+               class="ui mini button mc-btn"
+               title="View uploaded model card file">
+              <i class="file icon"></i> File
             </a>
-            <span if="{ !submission.model_card_url }">—</span>
+
+            <!-- PDF download (available for all submissions with model card data) -->
+            <a if="{ submission.has_model_card }"
+               href="{ '/api/submissions/' + submission.id + '/model-card/download/?dl=pdf' }"
+               class="ui mini button mc-btn"
+               title="Download model card as PDF">
+              <i class="file pdf icon"></i> PDF
+            </a>
+
+            <!-- JSON download -->
+            <a if="{ submission.has_model_card }"
+               href="{ '/api/submissions/' + submission.id + '/model-card/download/?dl=json' }"
+               class="ui mini button mc-btn"
+               title="Download model card as JSON">
+              <i class="file code icon"></i> JSON
+            </a>
+
+            <span if="{ !submission.model_card_url && !submission.has_model_card }">—</span>
           </td>
 
           <td each="{ column in filtered_columns }">
@@ -82,6 +136,8 @@
     let self = this;
 
     self.selected_leaderboard = { submissions: [] };
+    self.raw_submissions = [];       // original order from API (score-sorted)
+    self.sort_mode = 'score';        // 'score' | 'time'
     self.filtered_tasks = [];
     self.columns = [];
     self.filtered_columns = [];
@@ -137,6 +193,8 @@
           console.log("Leaderboard response:", data);
 
           self.selected_leaderboard = data || {};
+          // Keep a pristine copy for re-sorting
+          self.raw_submissions = (data && data.submissions) ? data.submissions.slice() : [];
           self.columns = [];
 
           if (data.tasks && data.tasks.length) {
@@ -152,6 +210,7 @@
 
           self.filtered_columns = self.columns.slice();
           self.rebuild_filtered_tasks();
+          self.apply_sort();  // apply current sort mode before render
 
           self.update();
         })
@@ -229,6 +288,65 @@
       return submission.id;
     };
 
+    // ── Sorting ───────────────────────────────────────────────────────────────
+
+    self.apply_sort = function () {
+      if (!self.raw_submissions.length) return;
+
+      let sorted = self.raw_submissions.slice();
+
+      if (self.sort_mode === 'time') {
+        // Newest submission first
+        sorted.sort(function (a, b) {
+          return new Date(b.created_when) - new Date(a.created_when);
+        });
+      } else {
+        // By primary score (desc), NULL last, tiebreak: newest first
+        let primary_index = (self.selected_leaderboard.primary_index != null)
+          ? self.selected_leaderboard.primary_index
+          : 0;
+
+        sorted.sort(function (a, b) {
+          let sa = Array.isArray(a.scores)
+            ? a.scores.find(function (s) { return s.index === primary_index; })
+            : null;
+          let sb = Array.isArray(b.scores)
+            ? b.scores.find(function (s) { return s.index === primary_index; })
+            : null;
+
+          let va = (sa && sa.score != null) ? parseFloat(sa.score) : null;
+          let vb = (sb && sb.score != null) ? parseFloat(sb.score) : null;
+
+          // NULL scores sink to the bottom
+          if (va === null && vb === null) return new Date(b.created_when) - new Date(a.created_when);
+          if (va === null) return 1;
+          if (vb === null) return -1;
+
+          // Higher score = better rank
+          if (vb !== va) return vb - va;
+
+          // Same score → newer submission first
+          return new Date(b.created_when) - new Date(a.created_when);
+        });
+      }
+
+      self.selected_leaderboard = Object.assign({}, self.selected_leaderboard, { submissions: sorted });
+    };
+
+    self.set_sort_score = function () {
+      if (self.sort_mode === 'score') return;
+      self.sort_mode = 'score';
+      self.apply_sort();
+      self.update();
+    };
+
+    self.set_sort_time = function () {
+      if (self.sort_mode === 'time') return;
+      self.sort_mode = 'time';
+      self.apply_sort();
+      self.update();
+    };
+
   </script>
 
   <style type="text/stylus">
@@ -237,5 +355,40 @@
 
     .index-column
       width 40px
+
+    .model-card-cell
+      white-space nowrap
+
+    .mc-btn
+      margin 2px 1px !important
+      padding 4px 8px !important
+      font-size 11px !important
+
+    .lb-toolbar
+      display flex
+      align-items center
+      flex-wrap wrap
+      gap 12px
+      margin-top 32px
+
+    .lb-search
+      width 33%
+      min-width 200px
+
+    .lb-sort-group
+      display flex
+      align-items center
+      gap 8px
+      margin-left auto
+
+    .lb-sort-label
+      font-size 13px
+      color rgba(0,0,0,.5)
+      white-space nowrap
+
+    .lb-sort-indicator
+      font-size 10px
+      color rgba(0,0,0,.4)
+      margin-left 2px
   </style>
 </leaderboards>

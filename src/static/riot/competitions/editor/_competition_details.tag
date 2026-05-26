@@ -92,39 +92,46 @@
       <input type="text" ref="rolling_end_period" placeholder="e.g., 2025 or 2024-12" onchange="{form_updated}">
     </div>
 
-    <div class="field required">
-      <label><strong>Model Card Visibility</strong></label>
+    <!-- Model Card Settings -->
+    <div class="field">
+      <label><strong>Model Card Settings</strong></label>
 
-      <div class="grouped fields" style="margin-top: 8px;">
-        <div class="field">
-          <div class="ui radio checkbox">
-            <input
-              type="radio"
-              name="model_card_is_public"
-              value="true"
-              ref="model_card_visibility_public"
-              onchange="{form_updated}"
-            />
-            <label>Public - anyone can view submitted model cards</label>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="ui radio checkbox">
-            <input
-              type="radio"
-              name="model_card_is_public"
-              value="false"
-              ref="model_card_visibility_private"
-              onchange="{form_updated}"
-            />
-            <label>Private - only competition organizers can view model cards</label>
-          </div>
-        </div>
+      <div class="ui checkbox" style="margin-bottom: 10px;">
+        <input type="checkbox" ref="enable_model_card_submission" onchange="{form_updated}">
+        <label>Require model card on submission (participants must fill in or upload a model card)</label>
       </div>
 
-      <div class="ui tiny grey message" style="margin-top: 8px;">
-        This is a competition-level setting. You can change it anytime.
+      <div class="field required" style="margin-top: 10px;">
+        <label>Model Card Visibility</label>
+        <div class="grouped fields" style="margin-top: 8px;">
+          <div class="field">
+            <div class="ui radio checkbox">
+              <input
+                type="radio"
+                name="model_card_is_public"
+                value="true"
+                ref="model_card_visibility_public"
+                onchange="{form_updated}"
+              />
+              <label>Public — anyone can view submitted model cards</label>
+            </div>
+          </div>
+          <div class="field">
+            <div class="ui radio checkbox">
+              <input
+                type="radio"
+                name="model_card_is_public"
+                value="false"
+                ref="model_card_visibility_private"
+                onchange="{form_updated}"
+              />
+              <label>Private — only competition organizers can view model cards</label>
+            </div>
+          </div>
+        </div>
+        <div class="ui tiny grey message" style="margin-top: 8px;">
+          These are competition-level settings. You can change them anytime.
+        </div>
       </div>
     </div>
 
@@ -428,6 +435,8 @@
         self.data.model_card_is_public = false
       }
 
+      self.data.enable_model_card_submission = !!(self.refs.enable_model_card_submission && self.refs.enable_model_card_submission.checked)
+
       self.data.enable_detailed_results = !!(self.refs.detailed_results && self.refs.detailed_results.checked)
       self.data.show_detailed_results_in_submission_panel = !!(self.refs.show_detailed_results_in_submission_panel && self.refs.show_detailed_results_in_submission_panel.checked)
       self.data.show_detailed_results_in_leaderboard = !!(self.refs.show_detailed_results_in_leaderboard && self.refs.show_detailed_results_in_leaderboard.checked)
@@ -589,6 +598,7 @@
           .dropdown('set value', competition.queue.id)
       }
 
+      if (self.refs.enable_model_card_submission) self.refs.enable_model_card_submission.checked = !!competition.enable_model_card_submission
       if (self.refs.detailed_results) self.refs.detailed_results.checked = !!competition.enable_detailed_results
       if (self.refs.show_detailed_results_in_submission_panel) self.refs.show_detailed_results_in_submission_panel.checked = !!competition.show_detailed_results_in_submission_panel
       if (self.refs.show_detailed_results_in_leaderboard) self.refs.show_detailed_results_in_leaderboard.checked = !!competition.show_detailed_results_in_leaderboard

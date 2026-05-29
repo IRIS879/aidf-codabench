@@ -47,7 +47,7 @@
                 This phase hasn't started yet!
             </div>
 
-            <form class="ui form coda-animated {error: errors}" ref="form" enctype="multipart/form-data">
+            <form class="ui form {error: errors}" ref="form" enctype="multipart/form-data">
 
                 <div class="submission-form" ref="fact_sheet_form" if="{ opts.fact_sheet !== null}">
                     <h2>Metadata or Fact Sheet</h2>
@@ -135,6 +135,90 @@
                                 <textarea class="mc-textarea" ref="mc_overview" rows="4"
                                     placeholder="Briefly describe the purpose of the model and the problem it is designed to solve."></textarea>
                             </div>
+                            <!-- ── Optional fields toggle ─────────────────── -->
+                            <div class="mc-optional-toggle" onclick="{ toggle_optional }">
+                                <i class="{ show_optional ? 'caret down' : 'caret right' } icon" style="font-size:11px;"></i>
+                                Optional Fields
+                            </div>
+
+                            <!-- Optional fields — hidden/shown via display:none (show), keeps DOM nodes so refs stay readable -->
+                            <div class="mc-optional-section" show="{ show_optional }">
+
+                                <div class="mc-section-header">Model Details</div>
+                                <div class="mc-field">
+                                    <label>Algorithm</label>
+                                    <input class="mc-input" type="text" ref="mc_algorithm"
+                                        placeholder="e.g. Discrete-Time Hazard model with logit link">
+                                </div>
+                                <div class="mc-field">
+                                    <label>Loss Function</label>
+                                    <input class="mc-input" type="text" ref="mc_loss_function"
+                                        placeholder="e.g. Logistic log-loss with L2 regularization">
+                                </div>
+                                <div class="mc-field">
+                                    <label>Training Procedure</label>
+                                    <textarea class="mc-textarea" ref="mc_training_procedure" rows="3"
+                                        placeholder="Describe how the model was trained, validated, and any hyperparameter tuning."></textarea>
+                                </div>
+
+                                <div class="mc-section-header">Data</div>
+                                <div class="mc-field">
+                                    <label>Data Source</label>
+                                    <textarea class="mc-textarea" ref="mc_data_source" rows="2"
+                                        placeholder="Describe where the training data comes from."></textarea>
+                                </div>
+                                <div class="mc-field">
+                                    <label>Target Variable</label>
+                                    <textarea class="mc-textarea" ref="mc_data_target" rows="2"
+                                        placeholder="Describe the prediction target / label."></textarea>
+                                </div>
+                                <div class="mc-field">
+                                    <label>Features <span class="mc-hint">— one per line</span></label>
+                                    <textarea class="mc-textarea" ref="mc_data_features" rows="4"
+                                        placeholder="Numeric firm-level predictors&#10;Identifier columns excluded: CompNo, yyyy, mm&#10;Discrete time variable (month) added"></textarea>
+                                </div>
+                                <div class="mc-field">
+                                    <label>Data Frequency</label>
+                                    <input class="mc-input" type="text" ref="mc_data_frequency"
+                                        placeholder="e.g. Monthly observations">
+                                </div>
+                                <div class="mc-field">
+                                    <label>Preprocessing Steps <span class="mc-hint">— one per line</span></label>
+                                    <textarea class="mc-textarea" ref="mc_data_preprocessing" rows="4"
+                                        placeholder="Median imputation to numeric predictors&#10;Standardization of numeric predictors&#10;One-hot encode month variable"></textarea>
+                                </div>
+
+                                <div class="mc-section-header">Evaluation</div>
+                                <div class="mc-field">
+                                    <label>Primary Metric</label>
+                                    <input class="mc-input" type="text" ref="mc_eval_primary"
+                                        placeholder="e.g. Mean ROC-AUC across requested prediction horizons">
+                                </div>
+                                <div class="mc-field">
+                                    <label>Secondary Metrics</label>
+                                    <input class="mc-input" type="text" ref="mc_eval_secondary"
+                                        placeholder="e.g. Horizon-specific ROC-AUC (1, 3, 6, 12, 24, 36, 48, 60 months)">
+                                </div>
+
+                                <div class="mc-section-header">Additional Information</div>
+                                <div class="mc-field">
+                                    <label>Limitations <span class="mc-hint">— one per line</span></label>
+                                    <textarea class="mc-textarea" ref="mc_limitations" rows="4"
+                                        placeholder="Assumes discrete monthly time intervals&#10;Only numeric features are used&#10;May perform poorly with sparse event rates"></textarea>
+                                </div>
+                                <div class="mc-field">
+                                    <label>Intended Use</label>
+                                    <textarea class="mc-textarea" ref="mc_intended_use" rows="2"
+                                        placeholder="Describe the intended use case and any restrictions."></textarea>
+                                </div>
+                                <div class="mc-field">
+                                    <label>Interpretability</label>
+                                    <textarea class="mc-textarea" ref="mc_interpretability" rows="2"
+                                        placeholder="Explain how the model's predictions can be interpreted."></textarea>
+                                </div>
+
+                            </div><!-- /mc-optional-section -->
+
                             <div class="mc-error" if="{ errors.model_card_form_data }">{ errors.model_card_form_data }</div>
                         </div>
 
@@ -245,6 +329,12 @@
 
     // 'form' = fill-in-page, 'upload' = file upload
     self.mc_mode = 'form'
+
+    self.show_optional = false
+    self.toggle_optional = function () {
+        self.show_optional = !self.show_optional
+        self.update()
+    }
 
     self.set_mc_mode_form = function () {
         self.mc_mode = 'form'
@@ -469,17 +559,54 @@
 
             var mc_form_data_json = null
             if (mc_required && self.mc_mode === 'form') {
-                // Build form data from input refs
-                var mc_model_name = self.refs.mc_model_name ? self.refs.mc_model_name.value.trim() : ''
-                var mc_task       = self.refs.mc_task       ? self.refs.mc_task.value.trim()       : ''
-                var mc_output_val = self.refs.mc_output     ? self.refs.mc_output.value.trim()     : ''
-                var mc_overview   = self.refs.mc_overview   ? self.refs.mc_overview.value.trim()   : ''
-                mc_form_data_json = JSON.stringify({
-                    model_name: mc_model_name,
-                    task:       mc_task,
-                    output:     mc_output_val,
-                    overview:   mc_overview
-                })
+                // Helper: trim a ref's value or return null
+                function _str(ref) {
+                    return (self.refs[ref] && self.refs[ref].value.trim()) || null
+                }
+                // Helper: split textarea lines into array, or null if empty
+                function _lines(ref) {
+                    var raw = self.refs[ref] && self.refs[ref].value.trim()
+                    if (!raw) return null
+                    var items = raw.split('\n').map(function (l) { return l.trim() }).filter(Boolean)
+                    return items.length ? items : null
+                }
+
+                // Required fields
+                var card = {
+                    model_name: self.refs.mc_model_name ? self.refs.mc_model_name.value.trim() : '',
+                    task:       self.refs.mc_task       ? self.refs.mc_task.value.trim()       : '',
+                    output:     self.refs.mc_output     ? self.refs.mc_output.value.trim()     : '',
+                    overview:   self.refs.mc_overview   ? self.refs.mc_overview.value.trim()   : ''
+                }
+
+                // Optional: Model Details
+                var model_obj = {}
+                if (_str('mc_algorithm'))          model_obj.algorithm          = _str('mc_algorithm')
+                if (_str('mc_loss_function'))       model_obj.loss_function      = _str('mc_loss_function')
+                if (_str('mc_training_procedure')) model_obj.training_procedure = _str('mc_training_procedure')
+                if (Object.keys(model_obj).length) card.model = model_obj
+
+                // Optional: Data
+                var data_obj = {}
+                if (_str('mc_data_source'))          data_obj.source        = _str('mc_data_source')
+                if (_str('mc_data_target'))          data_obj.target        = _str('mc_data_target')
+                if (_lines('mc_data_features'))      data_obj.features      = _lines('mc_data_features')
+                if (_str('mc_data_frequency'))       data_obj.frequency     = _str('mc_data_frequency')
+                if (_lines('mc_data_preprocessing')) data_obj.preprocessing = _lines('mc_data_preprocessing')
+                if (Object.keys(data_obj).length)    card.data = data_obj
+
+                // Optional: Evaluation
+                var eval_obj = {}
+                if (_str('mc_eval_primary'))   eval_obj.primary_metric    = _str('mc_eval_primary')
+                if (_str('mc_eval_secondary')) eval_obj.secondary_metrics = _str('mc_eval_secondary')
+                if (Object.keys(eval_obj).length) card.evaluation = eval_obj
+
+                // Optional: Additional
+                if (_lines('mc_limitations'))    card.limitations     = _lines('mc_limitations')
+                if (_str('mc_intended_use'))     card.intended_use    = _str('mc_intended_use')
+                if (_str('mc_interpretability')) card.interpretability = _str('mc_interpretability')
+
+                mc_form_data_json = JSON.stringify(card)
                 console.log("[submission-upload] upload mc_form_data_json =", mc_form_data_json)
             } else if (mc_required && self.mc_mode === 'upload') {
                 if (!model_card_file) {
@@ -793,6 +920,39 @@
     color #db2828
     font-size 12px
     margin-top 4px
+
+.mc-optional-toggle
+    font-size 12px
+    font-weight 600
+    color rgba(0,0,0,.5)
+    cursor pointer
+    padding 4px 0
+    margin-top 10px
+    user-select none
+
+    &:hover
+        color rgba(0,0,0,.75)
+
+.mc-optional-section
+    margin-top 6px
+    padding-top 4px
+    border-top 1px solid rgba(0,0,0,.06)
+
+.mc-section-header
+    font-size 11px
+    font-weight 700
+    text-transform uppercase
+    letter-spacing .05em
+    color rgba(0,0,0,.4)
+    border-bottom 1px solid rgba(0,0,0,.08)
+    padding-bottom 3px
+    margin-top 12px
+    margin-bottom 8px
+
+.mc-hint
+    font-weight 400
+    font-size 11px
+    color rgba(0,0,0,.4)
 
 #submission-output
     .submission-tabs

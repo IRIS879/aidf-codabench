@@ -475,6 +475,10 @@ def parse_model_card_form_data(data_dict):
         "output": str(data_dict["output"]).strip(),
         "overview": str(data_dict["overview"]).strip(),
     }
+    # Preserve any optional keys the participant included (mirrors parse_model_card_json)
+    for key, value in data_dict.items():
+        if key not in parsed_json:
+            parsed_json[key] = value
     return {
         "model_name": parsed_json["model_name"],
         "parsed_json": parsed_json,

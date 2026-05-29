@@ -7,7 +7,11 @@
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\nContent-Type: %{content_type}\\\\n\" \"http://localhost/api/submissions/28/model-card/download/?dl=pdf\")",
       "Bash(curl -s \"http://localhost/api/phases/35/get_leaderboard/\")",
       "Bash(python3 -c ' *)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost/api/phases/35/get_leaderboard/\")"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost/api/phases/35/get_leaderboard/\")",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(python -c ' *)",
+      "Bash(xargs grep -l \"competition.detail\\\\|competition_detail\\\\|competition-detail\")",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

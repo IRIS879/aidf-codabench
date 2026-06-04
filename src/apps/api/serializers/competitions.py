@@ -2,7 +2,7 @@ from drf_writable_nested import WritableNestedModelSerializer
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from api.fields import NamedBase64ImageField
+from api.fields import NamedBase64ImageField, StorageImageURLField
 from api.mixins import DefaultUserCreateMixin
 from api.serializers.datasets import DataDetailSerializer
 from api.serializers.leaderboards import LeaderboardSerializer, ColumnSerializer
@@ -449,6 +449,7 @@ class CompetitionCreateSerializer(CompetitionSerializer):
 class CompetitionDetailSerializer(serializers.ModelSerializer):
     created_by = serializers.CharField(source='created_by.username', read_only=True)
     owner_display_name = serializers.SerializerMethodField()
+    logo = StorageImageURLField(read_only=True, allow_null=True)
     logo_icon = NamedBase64ImageField(allow_null=True)
     pages = PageSerializer(many=True)
     phases = PhaseDetailSerializer(many=True)
@@ -548,6 +549,8 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
     created_by = serializers.CharField(source='created_by.username', read_only=True)
     owner_display_name = serializers.SerializerMethodField()
     participants_count = serializers.IntegerField(read_only=True)
+    logo = StorageImageURLField(read_only=True, allow_null=True)
+    logo_icon = StorageImageURLField(read_only=True, allow_null=True)
 
     class Meta:
         model = Competition

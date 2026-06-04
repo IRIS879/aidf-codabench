@@ -651,6 +651,10 @@ def upload_submission_scores(request, submission_pk):
     for column_key, score in request.data.get("scores").items():
         if column_key not in competition_columns:
             continue
+        # Skip None/null scores (e.g. when scoring failed and placeholder
+        # scores were written). DecimalField does not accept None.
+        if score is None:
+            continue
         score = SubmissionScore.objects.create(
             score=score,
             column=Column.objects.get(leaderboard=submission.phase.leaderboard, key=column_key)

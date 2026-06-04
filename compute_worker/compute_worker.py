@@ -522,7 +522,7 @@ class Run:
                 )
             )
         except Exception as e:
-            logger.error("This error might result in a Execution Time Exceeded error" + e)
+            logger.error("This error might result in a Execution Time Exceeded error: " + str(e))
             if os.environ.get("LOG_LEVEL", "info").lower() == "debug":
                 logger.exception(e)
 
@@ -802,8 +802,8 @@ class Run:
             )
         except Exception as e:
             logger.error(
-                "There was an error trying to connect to the websocket on the codabench instance"
-                + e
+                "There was an error trying to connect to the websocket on the codabench instance: "
+                + str(e)
             )
             if os.environ.get("LOG_LEVEL", "info").lower() == "debug":
                 logger.exception(e)
@@ -1655,7 +1655,8 @@ class Run:
             ]
             if train_label_fields:
                 dst_path = os.path.join(round_input_dir, "train.csv")
-                shutil.copy2(train_path, dst_path)
+                if os.path.abspath(train_path) != os.path.abspath(dst_path):
+                    shutil.copy2(train_path, dst_path)
                 logger.info(f"Using existing labeled train file: {dst_path}")
                 return
 
@@ -2674,6 +2675,18 @@ class Run:
             raise SubmissionException(
                 "Could not find scores file, did the scoring program output it?"
             )
+
+        # Replace float NaN/Inf with None so the payload is valid JSON.
+        # NaN arises when scoring fails (e.g. ingestion timeout) and the
+        # scoring program writes placeholder scores; None serialises as null.
+        def _sanitise(obj):
+            if isinstance(obj, dict):
+                return {k: _sanitise(v) for k, v in obj.items()}
+            if isinstance(obj, float) and (obj != obj or obj == float("inf") or obj == float("-inf")):
+                return None
+            return obj
+
+        scores = _sanitise(scores)
 
         url = (
             f"{self.submissions_api_url}/upload_submission_scores/{self.submission_id}/"

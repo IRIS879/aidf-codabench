@@ -4,8 +4,10 @@ import binascii
 import json
 
 import six
+from django.conf import settings
 from django.core.files.base import ContentFile
 from drf_extra_fields.fields import Base64ImageField
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.relations import SlugRelatedField
 
@@ -32,6 +34,14 @@ class NamedBase64ImageField(Base64ImageField):
         try:
             data = json.loads(named_json_data)
         except json.JSONDecodeError:
+            # If the value is a URL string (returned by to_representation and
+            # echoed back by the frontend without modification), skip updating
+            # this field rather than raising an error. This allows competition
+            # edits to succeed even when the logo has not been changed.
+            if isinstance(named_json_data, str) and named_json_data.startswith(
+                ("http://", "https://")
+            ):
+                raise serializers.SkipField()
             raise ValidationError(f"Invalid JSON data received: '{named_json_data}'")
         file_name = data["file_name"]
         base64_data = data["data"]
@@ -55,6 +65,39 @@ class NamedBase64ImageField(Base64ImageField):
             data = ContentFile(decoded_file, name=file_name)
             return data
         raise ValidationError('This is not an base64 string')
+
+    def to_representation(self, file):
+        url = super().to_representation(file)
+        if not url:
+            return url
+        # Replace the internal Docker endpoint (http://minio:9000) with the
+        # browser-accessible endpoint (http://localhost:9000) so that image
+        # URLs returned by the API can actually be loaded by the browser.
+        internal = getattr(settings, 'AWS_S3_ENDPOINT_URL', '').rstrip('/')
+        browser  = getattr(settings, 'AWS_S3_BROWSER_ENDPOINT_URL', '').rstrip('/')
+        if internal and browser and url.startswith(internal):
+            url = browser + url[len(internal):]
+        return url
+
+
+class StorageImageURLField(serializers.ImageField):
+    """
+    Read-only ImageField that replaces the internal Docker storage endpoint
+    (AWS_S3_ENDPOINT_URL, e.g. http://minio:9000) with the browser-accessible
+    endpoint (AWS_S3_BROWSER_ENDPOINT_URL, e.g. http://localhost:9000).
+
+    Use this wherever logo/logo_icon are serialized as plain URL strings.
+    """
+
+    def to_representation(self, file):
+        url = super().to_representation(file)
+        if not url:
+            return url
+        internal = getattr(settings, 'AWS_S3_ENDPOINT_URL', '').rstrip('/')
+        browser  = getattr(settings, 'AWS_S3_BROWSER_ENDPOINT_URL', '').rstrip('/')
+        if internal and browser and url.startswith(internal):
+            url = browser + url[len(internal):]
+        return url
 
 
 class SlugWriteDictReadField(SlugRelatedField):

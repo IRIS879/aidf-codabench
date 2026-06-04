@@ -11,7 +11,9 @@
       "mcp__Claude_in_Chrome__list_connected_browsers",
       "Bash(python -c ' *)",
       "Bash(xargs grep -l \"competition.detail\\\\|competition_detail\\\\|competition-detail\")",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python -c \"import zipfile; z=zipfile.ZipFile\\('tests/test_files/competitions/competition_v2_multi_task.zip'\\); print\\('\\\\n'.join\\(z.namelist\\(\\)\\)\\)\")",
+      "Bash(grep -n '\"[^\"]*\" + e$\\\\|\"[^\"]*\" + e ' \"C:\\\\Users\\\\Try\\\\Documents\\\\GitHub\\\\aidf-codabench\\\\compute_worker\\\\compute_worker.py\")"
     ]
   }
 }

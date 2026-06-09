@@ -40,6 +40,7 @@
           <th each="{ task in filtered_tasks }" class="center aligned" colspan="{ task.colWidth }">
             { task.name }
           </th>
+          <th if="{ opts.is_admin }"></th>
         </tr>
 
         <tr>
@@ -57,6 +58,7 @@
           <th>ID</th>
           <th>Model Card</th>
           <th each="{ column in filtered_columns }" colspan="1">{ column.title }</th>
+          <th if="{ opts.is_admin }" class="center aligned">Delete</th>
         </tr>
       </thead>
 
@@ -126,6 +128,13 @@
             <span if="{ column.title != 'Detailed Results' }">
               { get_submission_score(column, submission) }
             </span>
+          </td>
+          <td if="{ opts.is_admin }" class="center aligned">
+            <button class="ui mini red icon button"
+                    title="Delete submission"
+                    onclick="{ delete_submission.bind(this, submission) }">
+              <i class="trash icon"></i>
+            </button>
           </td>
         </tr>
       </tbody>
@@ -345,6 +354,27 @@
       self.sort_mode = 'time';
       self.apply_sort();
       self.update();
+    };
+
+    // ── Admin: Delete submission ──────────────────────────────────────────────
+
+    self.delete_submission = function (submission) {
+      let name = submission.model_name || ('ID ' + submission.id);
+      if (!confirm('Delete submission "' + name + '" (#' + submission.id + ')?\nThis cannot be undone.')) return;
+
+      CODALAB.api.delete_submission(submission.id)
+        .then(function () {
+          toastr.success('Submission #' + submission.id + ' deleted');
+          // Remove from local list and re-render
+          self.raw_submissions = self.raw_submissions.filter(function (s) {
+            return s.id !== submission.id;
+          });
+          self.apply_sort();
+          self.update();
+        })
+        .catch(function (err) {
+          toastr.error('Delete failed: ' + (err.message || err));
+        });
     };
 
   </script>

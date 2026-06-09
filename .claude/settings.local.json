@@ -13,7 +13,23 @@
       "Bash(xargs grep -l \"competition.detail\\\\|competition_detail\\\\|competition-detail\")",
       "Bash(echo \"EXIT:$?\")",
       "Bash(python -c \"import zipfile; z=zipfile.ZipFile\\('tests/test_files/competitions/competition_v2_multi_task.zip'\\); print\\('\\\\n'.join\\(z.namelist\\(\\)\\)\\)\")",
-      "Bash(grep -n '\"[^\"]*\" + e$\\\\|\"[^\"]*\" + e ' \"C:\\\\Users\\\\Try\\\\Documents\\\\GitHub\\\\aidf-codabench\\\\compute_worker\\\\compute_worker.py\")"
+      "Bash(grep -n '\"[^\"]*\" + e$\\\\|\"[^\"]*\" + e ' \"C:\\\\Users\\\\Try\\\\Documents\\\\GitHub\\\\aidf-codabench\\\\compute_worker\\\\compute_worker.py\")",
+      "Bash(find \"C:\\\\Users\\\\Try\\\\Desktop\\\\AIDF_task4\" -name \"ingestion.py\" -type f | head -5)",
+      "Bash(find \"C:\\\\Users\\\\Try\\\\Documents\\\\GitHub\" -type d -name \"input_data\" | head -10)",
+      "Bash(find \"C:\\\\Users\\\\Try\" -name \"*.ipynb\" -type f | grep -i \"lightgbm\\\\|aidf\\\\|model\" | head -10)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\publisher_files\\\\ingestion_program\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\publisher_files\\\\scoring_program\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\publisher_files\\\\input_data\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\publisher_files\\\\reference_data\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\sample_submission\")",
+      "Read(//home/user/Documents/GitHub/**)",
+      "Bash(python manage.py shell)",
+      "Bash(find / -name \"manage.py\" -path \"*/codabench/*\" 2>/dev/null | head -5)",
+      "Bash(docker-compose exec *)",
+      "Bash(docker exec *)",
+      "Bash(xargs grep -l -i \"leaderboard\")",
+      "Bash(xargs grep -l -i \"leaderboard\\\\|submission\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B1\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B2\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B3\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B4\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B5\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B6\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B7\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B8\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B9\")"
     ]
   }
 }

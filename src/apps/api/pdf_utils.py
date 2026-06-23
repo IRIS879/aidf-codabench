@@ -1,5 +1,5 @@
 """
-Utility functions for generating model card PDFs using ReportLab.
+Utility functions for generating PDFs using ReportLab.
 
 Values in the model card dict are rendered intelligently:
   - str / int / float / bool  →  plain paragraph
@@ -9,15 +9,17 @@ Values in the model card dict are rendered intelligently:
 Empty values (None, "", [], {}) are silently skipped at every level.
 """
 import io
+import json
 from datetime import datetime
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
     HRFlowable,
+    LongTable,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -323,6 +325,262 @@ def generate_model_card_pdf(
     # ── Footer ─────────────────────────────────────────────────────────────────
     story.append(Spacer(1, 20))
     story.append(HRFlowable(width="100%", thickness=0.5, color=TEXT_MUTED, spaceAfter=6))
+    story.append(Paragraph(
+        f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        styles["meta"],
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def generate_leaderboard_pdf(
+    leaderboard_title: str,
+    leaderboard_rows: dict,
+    competition_name: str = "",
+) -> bytes:
+    """
+    Generate a simple printable PDF for one leaderboard.
+
+    ``leaderboard_rows`` is expected to follow the structure returned by
+    ``CompetitionViewSet.collect_leaderboard_data`` for a single leaderboard.
+    """
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+        title=leaderboard_title,
+    )
+
+    styles = _build_styles()
+    story = []
+
+    header_data = [[Paragraph("LEADERBOARD", styles["title"])]]
+    if competition_name:
+        header_data.append([Paragraph(_xml_escape(competition_name), styles["subtitle"])])
+    header_data.append([Paragraph(_xml_escape(leaderboard_title), styles["subtitle"])])
+
+    header_table = Table(header_data, colWidths=[doc.width])
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), BRAND_DARK),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("ROUNDEDCORNERS", [6]),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 10))
+
+    if not leaderboard_rows:
+        story.append(Paragraph("No leaderboard entries available.", styles["body"]))
+        doc.build(story)
+        return buf.getvalue()
+
+    def _leaderboard_cell_text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            try:
+                text = json.dumps(value, ensure_ascii=False)
+            except Exception:
+                text = str(value)
+        else:
+            text = str(value)
+        text = " ".join(text.split())
+        if len(text) > 180:
+            text = text[:177] + "..."
+        return text
+
+    columns = list(next(iter(leaderboard_rows.values())).keys())
+    headers = ["Username"] + columns
+
+    cell_style = ParagraphStyle(
+        "lb_cell",
+        fontName="Helvetica",
+        fontSize=8,
+        textColor=TEXT_DARK,
+        leading=10,
+    )
+    header_style = ParagraphStyle(
+        "lb_header",
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        textColor=WHITE,
+        leading=10,
+        alignment=TA_CENTER,
+    )
+
+    rows = [[Paragraph(_xml_escape(str(col)), header_style) for col in headers]]
+    for username, values in leaderboard_rows.items():
+        row = [username] + [values.get(col, "") for col in columns]
+        rows.append([
+            Paragraph(_xml_escape(_leaderboard_cell_text(value)), cell_style)
+            for value in row
+        ])
+
+    first_col_width = min(max(doc.width * 0.18, 4 * cm), 7 * cm)
+    remaining = max(doc.width - first_col_width, 1)
+    other_col_width = remaining / max(len(columns), 1)
+    col_widths = [first_col_width] + [other_col_width] * len(columns)
+
+    table = LongTable(rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND_DARK),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cfd8dc")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, ROW_EVEN]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        styles["meta"],
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def generate_frontend_leaderboard_pdf(
+    leaderboard_title: str,
+    leaderboard_payload: dict,
+) -> bytes:
+    """
+    Generate a PDF from the same payload returned by ``PhaseViewSet.get_leaderboard``.
+    This mirrors the readable leaderboard table shown on the frontend rather than
+    the raw admin export structure.
+    """
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+        title=leaderboard_title,
+    )
+
+    styles = _build_styles()
+    story = []
+
+    header_data = [
+        [Paragraph("LEADERBOARD", styles["title"])],
+        [Paragraph(_xml_escape(leaderboard_title), styles["subtitle"])],
+    ]
+    header_table = Table(header_data, colWidths=[doc.width])
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), BRAND_DARK),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("ROUNDEDCORNERS", [6]),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 10))
+
+    tasks = leaderboard_payload.get("tasks") or []
+    columns = []
+    for task in tasks:
+        for column in (task.get("columns") or []):
+            columns.append({
+                "task_name": task.get("name") or "",
+                "title": column.get("title") or "",
+                "index": column.get("index"),
+                "key": column.get("key"),
+            })
+
+    def _score_for_column(submission, column):
+        for score in submission.get("scores") or []:
+            if score.get("index") == column.get("index") or score.get("column_key") == column.get("key"):
+                return score.get("score", "")
+        return ""
+
+    def _format_date(date_text):
+        return (date_text or "").replace("T", " ")[:16]
+
+    def _cell(value):
+        text = "" if value is None else str(value)
+        text = " ".join(text.split())
+        if len(text) > 120:
+            text = text[:117] + "..."
+        return Paragraph(_xml_escape(text), cell_style)
+
+    header_style = ParagraphStyle(
+        "frontend_lb_header",
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        textColor=WHITE,
+        leading=10,
+        alignment=TA_CENTER,
+    )
+    cell_style = ParagraphStyle(
+        "frontend_lb_cell",
+        fontName="Helvetica",
+        fontSize=8,
+        textColor=TEXT_DARK,
+        leading=10,
+    )
+
+    headers = ["#", "Model", "Date", "ID", "Model Card"] + [
+        (f'{col["task_name"]} - {col["title"]}' if col["task_name"] else col["title"])
+        for col in columns
+    ]
+
+    rows = [[Paragraph(_xml_escape(h), header_style) for h in headers]]
+    submissions = leaderboard_payload.get("submissions") or []
+    for idx, submission in enumerate(submissions, start=1):
+        row = [
+            idx,
+            submission.get("model_name") or "Model",
+            _format_date(submission.get("created_when")),
+            submission.get("id", ""),
+            "Yes" if submission.get("has_model_card") else "-",
+        ]
+        for column in columns:
+            row.append(_score_for_column(submission, column))
+        rows.append([_cell(value) for value in row])
+
+    if len(headers) <= 5:
+        col_widths = [1.0 * cm, 5.0 * cm, 3.2 * cm, 1.3 * cm, 2.0 * cm]
+    else:
+        fixed = [1.0 * cm, 4.8 * cm, 3.1 * cm, 1.2 * cm, 1.8 * cm]
+        remaining = max(doc.width - sum(fixed), 1)
+        metric_width = remaining / max(len(headers) - len(fixed), 1)
+        col_widths = fixed + [metric_width] * (len(headers) - len(fixed))
+
+    table = LongTable(rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND_DARK),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (3, 1), (3, -1), "CENTER"),
+        ("ALIGN", (4, 1), (4, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cfd8dc")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, ROW_EVEN]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 12))
     story.append(Paragraph(
         f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
         styles["meta"],

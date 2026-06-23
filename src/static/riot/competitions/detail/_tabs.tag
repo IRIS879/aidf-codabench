@@ -181,6 +181,11 @@
                     </div>
                 </div>
                     <div show="{competition.admin}" class="float-right">
+                        <a href="{ get_phase_leaderboard_pdf_url() }"
+                           target="new"
+                           class="ui primary button leaderboard-pdf-button">
+                            <i class="file pdf icon"></i> Leaderboard PDF
+                        </a>
                         <div class="ui compact menu">
                             <div class="ui simple dropdown item" style="padding: 0px 5px">
                                 <i class="download icon" style="font-size: 1.5em; margin: 0;"></i>
@@ -454,6 +459,13 @@
             }
         }
 
+        self.get_phase_leaderboard_pdf_url = function () {
+            if (!self.selected_phase_index) {
+                return "#"
+            }
+            return `/api/phases/${self.selected_phase_index}/leaderboard-pdf/`
+        }
+
         self.update()
 
 
@@ -483,6 +495,12 @@
 
         .float-right
             float right
+            display flex
+            align-items center
+            gap 8px
+
+        .leaderboard-pdf-button
+            margin-right 0 !important
 
         .details-menu
             width 100%

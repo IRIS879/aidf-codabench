@@ -303,6 +303,15 @@ class CompetitionResultDatatypesTests(APITestCase):
             for column in self.columns:
                 assert f'{task.name}({task.id})-{column.title}' in csv_header
 
+    def test_get_competition_leaderboard_by_id_as_pdf(self):
+        phase_choice = random.choice(self.phases).id
+        url = reverse('competition-results', kwargs={"pk": self.comp.id}) + f'?phase={phase_choice}&dl=pdf'
+        response = self.client.get(url, HTTP_ACCEPT='application/json')
+        self.assertEqual(response.status_code, 200)
+        assert response['content-type'] == 'application/pdf'
+        assert response['Content-Disposition'].endswith('.pdf"')
+        assert response.content.startswith(b'%PDF')
+
     def test_get_competition_leaderboard_as_zip(self):
         url = reverse('competition-results', kwargs={"pk": self.comp.id})[0:-1] + '.zip'
         response = self.client.get(url)

@@ -270,7 +270,7 @@ class CompetitionViewSet(ModelViewSet):
             return CompetitionSerializerSimple
         if self.action == 'public':
             return CompetitionSerializerSimple
-        elif self.action in ['get_phases', 'results', 'get_leaderboard_frontend_object']:
+        elif self.action in ['get_phases', 'results', 'results_pdf', 'get_leaderboard_frontend_object']:
             return LeaderboardPhaseSerializer
         elif self.request.method == 'GET':
             return CompetitionDetailSerializer
@@ -528,6 +528,7 @@ class CompetitionViewSet(ModelViewSet):
         if not competition.user_has_admin_permission(request.user):
             raise PermissionDenied("You are not a competition admin or superuser")
         selected_phase = request.GET.get('phase')
+        download_format = request.GET.get('dl', '').lower()
         data = self.collect_leaderboard_data(competition, selected_phase)
         if format == 'zip':
             with SpooledTemporaryFile() as tmp:
@@ -552,7 +553,28 @@ class CompetitionViewSet(ModelViewSet):
                 response['Content-Disposition'] = 'attachment; filename={}.zip'.format(competition.title)
                 return response
 
-        if format == 'json':
+        if format in (None, 'json'):
+            if download_format == 'pdf':
+                if len(data) > 1:
+                    raise ValidationError("More than one matching leaderboard. Try selecting phase before exporting PDF.")
+                elif len(data) == 0:
+                    raise ValidationError("No Matching Leaderboard")
+
+                leaderboard_title = list(data.keys())[0]
+                from api.pdf_utils import generate_leaderboard_pdf
+
+                pdf_bytes = generate_leaderboard_pdf(
+                    leaderboard_title=leaderboard_title,
+                    leaderboard_rows=data[leaderboard_title],
+                    competition_name=competition.title or "",
+                )
+                response = HttpResponse(pdf_bytes, content_type="application/pdf")
+                safe_name = "".join(
+                    ch for ch in leaderboard_title.replace(" ", "_")
+                    if ch.isalnum() or ch in ("_", "-", ".", "(", ")")
+                )[:120] or f"competition_{competition.id}_leaderboard"
+                response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+                return response
             return HttpResponse(json.dumps(data, indent=4), content_type="application/json")
 
         elif format == 'csv':
@@ -580,6 +602,36 @@ class CompetitionViewSet(ModelViewSet):
                 row.update(data[leaderboard_title][submission])
                 dict_writer.writerow(row)
             return response
+
+    @action(detail=True, methods=['GET'], url_path='results-pdf')
+    def results_pdf(self, request, pk=None):
+        competition = self.get_object()
+        if not competition.user_has_admin_permission(request.user):
+            raise PermissionDenied("You are not a competition admin or superuser")
+
+        selected_phase = request.GET.get('phase')
+        data = self.collect_leaderboard_data(competition, selected_phase)
+
+        if len(data) > 1:
+            raise ValidationError("More than one matching leaderboard. Try selecting phase before exporting PDF.")
+        elif len(data) == 0:
+            raise ValidationError("No Matching Leaderboard")
+
+        leaderboard_title = list(data.keys())[0]
+        from api.pdf_utils import generate_leaderboard_pdf
+
+        pdf_bytes = generate_leaderboard_pdf(
+            leaderboard_title=leaderboard_title,
+            leaderboard_rows=data[leaderboard_title],
+            competition_name=competition.title or "",
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        safe_name = "".join(
+            ch for ch in leaderboard_title.replace(" ", "_")
+            if ch.isalnum() or ch in ("_", "-", ".", "(", ")")
+        )[:120] or f"competition_{competition.id}_leaderboard"
+        response['Content-Disposition'] = f'attachment; filename="{safe_name}.pdf"'
+        return response
 
     # @swagger_auto_schema(responses={200: CompetitionCreationTaskStatusSerializer()})
     @extend_schema(responses={200: CompetitionCreationTaskStatusSerializer})
@@ -942,6 +994,26 @@ class PhaseViewSet(ModelViewSet):
                 tempTask['columns'].append(col)
             response['tasks'].append(tempTask)
         return Response(response)
+
+    @action(detail=True, methods=['GET'], permission_classes=[AllowAny], url_path='leaderboard-pdf')
+    def leaderboard_pdf(self, request, pk=None):
+        phase = self.get_object()
+        competition = phase.competition
+        if not competition.user_has_admin_permission(request.user):
+            raise PermissionDenied("You are not a competition admin or superuser")
+
+        frontend_payload = self.get_leaderboard(request, pk).data
+        from api.pdf_utils import generate_frontend_leaderboard_pdf
+
+        title = frontend_payload.get('title') or phase.name or f'phase_{phase.id}'
+        pdf_bytes = generate_frontend_leaderboard_pdf(title, frontend_payload)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        safe_name = "".join(
+            ch for ch in title.replace(" ", "_")
+            if ch.isalnum() or ch in ("_", "-", ".", "(", ")")
+        )[:120] or f"phase_{phase.id}_leaderboard"
+        response["Content-Disposition"] = f'attachment; filename="{safe_name}.pdf"'
+        return response
 
 
 class CompetitionParticipantViewSet(ModelViewSet):

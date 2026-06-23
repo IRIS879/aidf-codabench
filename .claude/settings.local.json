@@ -29,7 +29,11 @@
       "Bash(docker exec *)",
       "Bash(xargs grep -l -i \"leaderboard\")",
       "Bash(xargs grep -l -i \"leaderboard\\\\|submission\")",
-      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B1\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B2\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B3\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B4\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B5\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B6\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B7\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B8\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B9\")"
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B1\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B2\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B3\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B4\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B5\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B6\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B7\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B8\" \"C:\\\\Users\\\\Try\\\\Desktop\\\\Test4\\\\submissions\\\\B9\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Try\\\\Desktop\\\\LightGBM_tuning\")",
+      "Bash(python generate_v3.py)",
+      "PowerShell(python \"C:\\\\Users\\\\Try\\\\Desktop\\\\USData\\\\make_neural_submissions.py\")",
+      "Bash(docker top *)"
     ]
   }
 }

@@ -906,7 +906,7 @@ class PhaseViewSet(ModelViewSet):
                                for question in phase.competition.fact_sheet if phase.competition.fact_sheet[question]['is_on_leaderboard'] == 'true']
         else:
             fact_sheet_keys = None
-        query = LeaderboardPhaseSerializer(phase).data
+        query = LeaderboardPhaseSerializer(phase, context={'request': request}).data
         response = {
             'title': query['leaderboard']['title'],
             'id': phase.id,

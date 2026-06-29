@@ -2,7 +2,7 @@
     <div class="ui two column grid">
         <div class="eight wide column">
             <div class="ui large header">
-                Popular Benchmarks
+                Popular Tests
             </div>
             <div class="loader-container popular">
                 <div class="lds-ring">
@@ -18,7 +18,7 @@
 
         <div class="eight wide column">
             <div class="ui large header">
-                Recent Benchmarks
+                Recent Tests
             </div>
             <div class="loader-container popular">
                 <div class="lds-ring">
@@ -65,18 +65,20 @@
             width: fit-content;
             margin: 20px auto;
             padding: 10px 20px;
-            background-color: #4a6778;
+            background: linear-gradient(135deg, #7da2cb, #4d78aa);
             color: white;
             text-align: center;
-            border-radius: 5px;
+            border-radius: 10px;
             font-size: 1.1em;
             text-decoration: none;
-            transition: background-color 0.3s, transform 0.3s;
+            box-shadow: 0 12px 24px rgba(77, 120, 170, 0.18);
+            transition: background-color 0.3s, transform 0.3s, box-shadow 0.3s;
         }
 
         .show-more:hover {
-            background-color: #467799;
+            background: linear-gradient(135deg, #0c4f96, #083565);
             transform: scale(1.05);
+            box-shadow: 0 16px 30px rgba(12, 79, 150, 0.25);
             text-decoration: none;
         }
 

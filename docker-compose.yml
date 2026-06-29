@@ -25,11 +25,12 @@ services:
     build: .
     # NOTE: We use watchmedo to reload gunicorn nicely, Uvicorn + Gunicorn reloads don't work well
     # Ensure MEDIA_ROOT exists on fresh clones so file uploads have a writable target.
-    command: bash -c "mkdir -p /app/src/uploads && chmod 0777 /app/src/uploads && python manage.py collectstatic --noinput && cd /app/src && watchmedo auto-restart -p '*.py' --recursive -- python3 ./gunicorn_run.py"
+    command: bash -c "mkdir -p /app/src/uploads && chmod 0777 /app/src/uploads && python manage.py collectstatic --noinput && cd /app/src && watchmedo auto-restart -p '*.py;*.html;*.json' --recursive -- python3 ./gunicorn_run.py"
     environment:
       - DATABASE_URL=postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
       - DJANGO_SETTINGS_MODULE=settings.develop
       - PYTHONPATH=/app:/app/src:/app/src/apps
+      - GUNICORN_WORKERS=1
     env_file: .env
     volumes:
       - .:/app:delegated

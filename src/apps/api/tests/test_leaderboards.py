@@ -128,3 +128,43 @@ class HiddenLeaderboardTests(APITestCase):
         self.lb.save()
         resp = self.get_leaderboard()
         assert resp.status_code == 200
+
+
+class ModelCardLeaderboardVisibilityTests(APITestCase):
+    def setUp(self):
+        self.creator = factories.UserFactory(username='creator-mc', password='test')
+        self.participant = factories.UserFactory(username='participant-mc', password='test')
+        self.comp = factories.CompetitionFactory(
+            created_by=self.creator,
+            enable_model_card_submission=True,
+            model_card_is_public=False,
+        )
+        self.lb = factories.LeaderboardFactory(hidden=False)
+        self.phase = factories.PhaseFactory(competition=self.comp, leaderboard=self.lb)
+        factories.ColumnFactory(leaderboard=self.lb, index=0)
+
+        self.submission = factories.SubmissionFactory(
+            phase=self.phase,
+            leaderboard=self.lb,
+            owner=self.participant,
+            status='Finished',
+            model_card_parsed_json={
+                "model_name": "Test Model",
+                "task": "Test Task",
+                "output": "Test Output",
+                "overview": "Test overview",
+            },
+        )
+
+    def test_competition_admin_can_see_model_card_flags_on_phase_leaderboard(self):
+        self.client.force_login(self.creator)
+        resp = self.client.get(f'/api/phases/{self.phase.pk}/get_leaderboard/')
+        assert resp.status_code == 200
+        assert len(resp.data['submissions']) == 1
+        assert resp.data['submissions'][0]['has_model_card'] is True
+
+    def test_anonymous_user_cannot_see_model_card_flags_when_not_public(self):
+        resp = self.client.get(f'/api/phases/{self.phase.pk}/get_leaderboard/')
+        assert resp.status_code == 200
+        assert len(resp.data['submissions']) == 1
+        assert resp.data['submissions'][0]['has_model_card'] is False

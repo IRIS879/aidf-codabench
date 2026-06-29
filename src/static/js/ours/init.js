@@ -2,8 +2,10 @@ $(document).ready(function () {
     /*-----------------------------------------------------------------------------
      Template niceties
      */
-    // header particles
-    particlesJS.load('bg', URLS.assets.header_particles)
+    // Keep the homepage background stable while allowing subtle particles when available.
+    if (document.getElementById('bg') && window.particlesJS && URLS && URLS.assets && URLS.assets.header_particles) {
+        particlesJS.load('bg', URLS.assets.header_particles)
+    }
 
     // fix menu when passed
     $('.masthead')

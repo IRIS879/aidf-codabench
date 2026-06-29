@@ -1,7 +1,7 @@
 <public-list>
   <!-- Title -->
   <div class="page-header">
-    <h1 class="page-title">Public Benchmarks and Competitions</h1>
+    <h1 class="page-title">Public Tests</h1>
     <div class="action-buttons">
       <a class="create-btn" href="{ URLS.COMPETITION_ADD }">
         <i class="bi bi-plus-square-fill me-1"></i> Create
@@ -38,7 +38,7 @@
 
         <!-- Your competitions filters   -->
         <div class="filter-group">
-            <strong class="filter-label">Your Competitions</strong>
+            <strong class="filter-label">Your Tests</strong>
             <label><input type="checkbox" onchange="{toggle_participating}"> Participating In</label>
             <label><input type="checkbox" onchange="{toggle_organizing}"> Organizing</label>
         </div>
@@ -71,7 +71,7 @@
             <div class="comp-info">
               <h4 class="heading">{competition.title}</h4>
               <p class="comp-description">{ pretty_description(competition.description) }</p>
-              <p class="organizer"><em>Organized by: <strong>{competition.created_by}</strong></em></p>
+              <p class="organizer"><em>Managed by: <strong>{competition.created_by}</strong></em></p>
             </div>
           </a>
           <div class="comp-stats">
@@ -89,7 +89,7 @@
       <!-- Show when there are no competitions in the list -->
       <div class="no-results-message" if="{competitions.results && competitions.results.length === 0}">
         <div class="ui warning message">
-          <div class="header">No competitions found</div>
+          <div class="header">No tests found</div>
           Try changing your filters or search term.
         </div>
       </div>
@@ -307,23 +307,31 @@
       margin 0
       font-size 24px
       font-weight bold
-      color #1b1b1b
+      color #18324a
     
     .create-btn
       font-size 14px
       padding 0.5em 1em
-      background-color #43637a
+      background linear-gradient(135deg, #0c4f96, #083565)
       color #fff
       text-decoration none
-      border-radius 4px
+      border-radius 10px
       display inline-block
       cursor pointer
-      transition background-color 0.2s ease
+      transition transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease
+      box-shadow 0 12px 24px rgba(8, 53, 101, 0.18)
 
       &:hover
-        background-color #2d3f4d
+        background linear-gradient(135deg, #f59d27, #eb8d0a)
         color #fff
         text-decoration none
+        transform translateY(-1px)
+
+      &:last-child
+        background linear-gradient(135deg, #f59d27, #eb8d0a)
+
+        &:hover
+          background linear-gradient(135deg, #0c4f96, #083565)
 
     .content-container
       display flex
@@ -332,11 +340,13 @@
     .filters-panel
       width 250px
       flex-shrink 0
-      border 1px solid #ddd
-      padding 10px
+      border 1px solid #d8e5f2
+      border-radius 16px
+      padding 14px
       margin-right 10px
       margin-left 0 !important
-      background #f9f9f9
+      background #fff
+      box-shadow 0 18px 40px rgba(12, 79, 150, 0.08)
 
       input[type="text"]
           width 100%
@@ -388,23 +398,24 @@
       width 100%
 
     .tile-wrapper
-      border solid 1px gainsboro
+      border solid 1px #d8e5f2
+      border-radius 14px
       display inline-flex
       min-width 425px
       background-color #fff
       transition all 75ms ease-in-out
-      color #909090
+      color #617589
       width 100%
       margin-bottom 6px
 
     .tile-wrapper:hover
-      box-shadow 0 3px 4px -1px #cac9c9ff
+      box-shadow 0 14px 28px rgba(12, 79, 150, 0.12)
       transition all 75ms ease-in-out
-      background-color #e6edf2
-      border solid 1px #a5b7c5
+      background-color #f8fbfe
+      border solid 1px #b5cde5
 
       .comp-stats
-        background-color #344d5e
+        background-color #0c4f96
         transition background-color 75ms ease-in-out
 
     .img-wrapper
@@ -437,7 +448,7 @@
       margin 0.35em
 
     .comp-stats
-      background #405e73
+      background #083565
       color #e8e8e8
       padding 10px
       text-align center

@@ -57,23 +57,25 @@
             cursor pointer
 
         .tile-wrapper
-            border solid 1px gainsboro
+            border solid 1px #d8e5f2
+            border-radius 14px
             display inline-grid
             grid-template-columns 0.1fr 3fr 1.3fr
             min-width 425px
-            background-color #fff
+            background linear-gradient(180deg, #ffffff, #f8fbff)
             transition all 75ms ease-in-out
-            color #909090
+            color #617589
             width 100%
+            overflow hidden
 
         .tile-wrapper:hover
-            box-shadow 0 3px 4px -1px #9c9c9c
+            box-shadow 0 14px 28px rgba(12, 79, 150, 0.12)
             transition all 75ms ease-in-out
-            background-color #e8e8e8
-            border solid 1px #b9b9b9
+            background linear-gradient(180deg, #ffffff, #f2f8ff)
+            border solid 1px #b5cde5
 
             .comp-stats
-                background-color #344d5e
+                background linear-gradient(180deg, #3268b0, #0b4a8a)
                 transition background-color 75ms ease-in-out
        
         .tile-wrapper.featured
@@ -93,7 +95,7 @@
         .comp-info .heading
             text-align left
             padding 5px
-            color #1b1b1b
+            color #18324a
             margin-bottom 0
 
         .featured-badge
@@ -107,14 +109,15 @@
             display inline-block
 
         .comp-info .comp-description
-            text-align: left;
+            text-align left
             font-size 13px
             line-height 1.15em
             margin 0.35em
+            color #617589
 
         .comp-stats
-            background #405e73
-            color #e8e8e8
+            background linear-gradient(180deg, #3a72ba, #0b4a8a 72%, #083565)
+            color #f4f8fc
             padding 10px
             text-align center
             font-size 12px
@@ -123,6 +126,10 @@
             font-size 13px
             text-align left
             margin 0.35em
+            color #7b8ea3
+
+            strong
+                color #0c4f96
     </style>
 
 </competition-tile>

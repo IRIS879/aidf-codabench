@@ -144,7 +144,7 @@ class LeaderboardEntriesSerializer(serializers.ModelSerializer):
             .prefetch_related('scores', 'scores__column')
         )
         return SubmissionLeaderBoardSerializer(
-            _order_submissions_by_score(qs, instance), many=True
+            _order_submissions_by_score(qs, instance), many=True, context=self.context
         ).data
 
 
@@ -190,5 +190,5 @@ class LeaderboardPhaseSerializer(serializers.ModelSerializer):
             .prefetch_related('scores', 'scores__column')
         )
         return SubmissionLeaderBoardSerializer(
-            _order_submissions_by_score(qs, instance.leaderboard), many=True
+            _order_submissions_by_score(qs, instance.leaderboard), many=True, context=self.context
         ).data

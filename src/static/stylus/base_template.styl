@@ -18,77 +18,112 @@
 
  header/background
  */
+$aidfBlue = #0c4f96
+$aidfBlueDeep = #0b4a8a
+$aidfBlueSoft = #6f95c5
+$aidfOrange = #f59d27
+$aidfOrangeSoft = #ffcb86
+$surface = #eef4fb
+$surfaceStrong = #ffffff
+$textDark = #18324a
+$textMuted = #5d7186
+
 html
-    background-color #f6f8fa
+    background-color $surface
 
 #bg
     z-index -1
     position absolute
-    top 0
+    top 88px
     bottom 0
     left 0
     right 0
-    background rgba(19, 48, 70, 0.9)
+    background linear-gradient(135deg, #3468b2 0%, #1d4f8f 48%, #0b2e5c 100%)
+    background-size 115% 115%
+    animation heroShift 18s ease-in-out infinite alternate
+    opacity 1
+    pointer-events none
 
 #jumbo_logo
-    margin-top 20px
-    width 35%
-
-.organization-logos
-    position absolute
-    bottom 5px
-    right 0
-
-
-.organization-logo
-    height 30px
-    margin-right 5px
+    margin-top 0
+    width 100%
+    max-width 260px
 
 #home-logo
-    margin-left: 8px;
-    margin-right: 8px;
+    display inline-flex
+    align-items center
+    justify-content center
+    padding 0.4rem 0
+    color #173b68
+    font-size 1rem
+    font-weight 700
+    letter-spacing 0.04em
+    text-transform uppercase
+    text-decoration none
 
-.right.item
-    position absolute !important
-    right 0
-    top 9px
+#home-logo:hover
+    color #0b2e5c
 
+.home-brand-text
+    display inline-block
 
-.left.item
-    position absolute !important
-    left 0
-    top 9px
+.topbar-aidf-logo
+    display block
+    height 28px
+    width auto
+    max-width 150px
 
 .ui.secondary.inverted.pointing.menu
     border transparent
 
 .jumbotron
-    padding 0 0 2em 0 !important
+    padding 1.25rem 0 2.5rem 0 !important
+    min-height 0 !important
 
     .subtitle
-        color #b7c9d69c
+        color rgba(238, 245, 252, 0.75)
         font-size 1rem
 
 .style_button
-    color #e2e2e2
-    background-color rgba(255, 255, 255, .15)
-    font-weight 100
+    color white
+    background linear-gradient(135deg, $aidfOrange, darken($aidfOrange, 8%))
+    font-weight 500
+    border 1px solid rgba(255, 255, 255, 0.12)
+    box-shadow 0 12px 30px rgba(245, 157, 39, 0.25)
 
 .style_button:hover
-    color #3f3f3f
-    background-color rgba(255, 255, 255, .65)
+    color white
+    background linear-gradient(135deg, lighten($aidfOrange, 4%), darken($aidfOrange, 10%))
     .icon
         opacity 1
 
+.masthead .ui.primary.button
+    background linear-gradient(135deg, $aidfOrange, darken($aidfOrange, 8%))
+    color white
+    box-shadow 0 14px 32px rgba(245, 157, 39, 0.28)
+
+.masthead .ui.primary.button:hover
+    background linear-gradient(135deg, lighten($aidfOrange, 4%), darken($aidfOrange, 10%))
+    color white
+
+.masthead .ui.buttons .button:not(.primary)
+    background linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08))
+    color white
+    border 1px solid rgba(255, 255, 255, 0.18)
+
+.masthead .ui.buttons .button:not(.primary):hover
+    background linear-gradient(135deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.14))
+    color white
+
 #user_dropdown
-    color rgba(255,255,255,.7) !important
+    color rgba(255,255,255,.92) !important
 
     a
         width 100%
         border-radius 0 !important
 
 #competition_dropdown
-    color rgba(255,255,255,.7) !important
+    color rgba(255,255,255,.92) !important
 
     a
         width 100%
@@ -132,6 +167,7 @@ html
 
     p
         font-size 1.33em
+        color rgba(242, 247, 252, 0.9)
 
     .horizontal.divider
         margin 3em 0
@@ -149,13 +185,109 @@ html
 
 #header
     background transparent
-    margin-bottom 20px
+    margin-bottom 10px
+    padding-top 0 !important
+    padding-bottom 0 !important
 
     .ui.menu .ui.dropdown .menu>.item
         color rgba(0, 0, 0, 0.6) !important
 
     .icon.user.outline
         margin-right 0
+
+    .ui.secondary.inverted.menu .item
+        color rgba(255,255,255,0.92) !important
+
+    .ui.secondary.inverted.menu .item:hover
+        color white !important
+
+    > .ui.container
+        position relative
+        z-index 2
+
+.header-brand-strip
+    position relative
+    z-index 2
+    background rgba(255,255,255,0.98)
+    border-bottom 1px solid rgba(210, 223, 239, 0.8)
+
+    .brand-strip-inner
+        min-height 54px
+        display flex
+        align-items center
+
+.header-nav-strip
+    position relative
+    z-index 2
+    background linear-gradient(90deg, #295b9a 0%, #1d4f8f 55%, #133f76 100%)
+    border-bottom 1px solid rgba(255,255,255,0.1)
+    box-shadow 0 10px 24px rgba(7, 42, 86, 0.12)
+
+#topleft_menu
+    display flex
+    align-items center
+    justify-content space-between
+    gap 1rem
+    min-height 60px
+    margin 0
+    background transparent
+    border none
+    border-radius 0
+    box-shadow none
+    backdrop-filter none
+
+    .left.item,
+    .center.item,
+    .right.menu.item
+        position static !important
+        margin 0 !important
+        padding 0 !important
+
+    .nav-left-group
+        display flex
+        align-items center
+        gap 0.35rem
+        flex-wrap wrap
+
+    .nav-search-group
+        flex 1
+        display flex
+        justify-content center
+        padding 0 1.2rem !important
+
+    .nav-right-group
+        display flex
+        align-items center
+
+    .right.menu.item .item
+        padding-top 0.75rem
+        padding-bottom 0.75rem
+
+    .item
+        font-weight 500
+
+    .home-link
+        font-weight 700
+        border-bottom 2px solid rgba(255,255,255,0.85)
+
+    .search-width
+        width 24em !important
+
+    .ui.left.icon.input input
+        background rgba(255,255,255,0.96) !important
+        border none !important
+        color $textDark !important
+
+    .search.icon
+        color rgba(35, 77, 128, 0.45) !important
+
+    .auth-link
+        text-decoration underline
+
+    .style_button
+        margin-left 0.55rem !important
+        border 1px solid rgba(255,255,255,0.24)
+        box-shadow none
 
 #toast-container
     opacity 0.8
@@ -186,6 +318,9 @@ html
 @media only screen and (max-width 625px)
     .tl.item
         display none!important
+
+    #topleft_menu
+        display none
 
 #hamburger_button
         position absolute
@@ -224,7 +359,7 @@ html
  Force the footer to stretch all the way to the bottom of viewport
  */
 body.pushable>.pusher
-    background-color #f6f8fa !important
+    background-color $surface !important
     overflow initial
 
 .pushable
@@ -278,3 +413,9 @@ body.pushable>.pusher
 #version a 
     text-decoration none
     color inherit
+
+@keyframes heroShift
+    0%
+        background-position 0% 30%
+    100%
+        background-position 100% 70%

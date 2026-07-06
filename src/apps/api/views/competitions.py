@@ -1,8 +1,9 @@
 import zipfile
 import json
 import csv
+import pickle
 from collections import OrderedDict
-from io import StringIO
+from io import StringIO, BytesIO
 from django.http import HttpResponse
 from tempfile import SpooledTemporaryFile
 from django.db import IntegrityError
@@ -30,7 +31,7 @@ from competitions.emails import send_participation_requested_emails, send_partic
 from competitions.models import Competition, Phase, CompetitionCreationTaskStatus, CompetitionParticipant, Submission
 from datasets.models import Data
 from competitions.tasks import batch_send_email, manual_migration, create_competition_dump
-from competitions.utils import get_popular_competitions, get_recent_competitions
+from competitions.utils import get_recent_competitions
 from leaderboards.models import Leaderboard
 from utils.data import make_url_sassy
 from api.permissions import IsOrganizerOrCollaborator
@@ -41,6 +42,78 @@ from django.conf import settings
 class CompetitionViewSet(ModelViewSet):
     queryset = Competition.objects.all()
     permission_classes = (AllowAny,)
+
+    def _build_sample_submission_zip(self, mode="code-only"):
+        metadata_yaml = "command: python /app/program/ingestion.py $input $output $submission_program\n"
+
+        code_only_model = """import numpy as np
+import pandas as pd
+
+
+class Model:
+    def __init__(self):
+        self.default_risk = 0.05
+
+    def fit(self, X_train, durations, events):
+        y = ((durations <= 12) & (events == 1)).astype(int)
+        self.default_risk = float(np.mean(y)) if len(y) > 0 else 0.05
+        return self
+
+    def predict_risk(self, X_test, horizons=[12]):
+        risk = np.full(len(X_test), self.default_risk, dtype=float)
+        return pd.DataFrame({"risk_12": risk})
+"""
+
+        pretrained_model = """import pickle
+import numpy as np
+import pandas as pd
+
+
+class Model:
+    def __init__(self):
+        self.state = None
+
+    def fit(self, X_train, durations, events):
+        # Example only: load a serialized artifact shipped in the ZIP package.
+        with open("model.pkl", "rb") as model_file:
+            self.state = pickle.load(model_file)
+        return self
+
+    def predict_risk(self, X_test, horizons=[12]):
+        risk_value = float(self.state.get("risk_constant", 0.05))
+        risk = np.full(len(X_test), risk_value, dtype=float)
+        return pd.DataFrame({"risk_12": risk})
+"""
+
+        readme = (
+            "Sample submission package for the US Default Prediction benchmark.\n\n"
+            "Required files:\n"
+            "- model.py\n"
+            "- metadata.yaml\n\n"
+            "Optional serialized artifact example:\n"
+            "- model.pkl\n\n"
+            "Required interface:\n"
+            "- fit(X_train, durations, events)\n"
+            "- predict_risk(X_test, horizons=[12])\n\n"
+            "Expected output:\n"
+            "- A pandas DataFrame with one column named risk_12.\n"
+        )
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr("metadata.yaml", metadata_yaml)
+            zip_file.writestr("README.txt", readme)
+            if mode == "with-model":
+                zip_file.writestr("model.py", pretrained_model)
+                zip_file.writestr(
+                    "model.pkl",
+                    pickle.dumps({"risk_constant": 0.05}, protocol=pickle.HIGHEST_PROTOCOL),
+                )
+            else:
+                zip_file.writestr("model.py", code_only_model)
+
+        buffer.seek(0)
+        return buffer.getvalue()
 
     def _task_key_from_phase_item(self, item):
         if isinstance(item, dict):
@@ -115,6 +188,23 @@ class CompetitionViewSet(ModelViewSet):
                 "training_and_evaluation_details": ""
             }
         return Response(template, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], permission_classes=(AllowAny,), url_path='sample-submission')
+    def sample_submission(self, request, pk=None):
+        self.get_object()
+        mode = request.GET.get("mode", "code-only").lower()
+        if mode not in {"code-only", "with-model"}:
+            raise ValidationError({"mode": "mode must be either 'code-only' or 'with-model'."})
+
+        zip_bytes = self._build_sample_submission_zip(mode=mode)
+        response = HttpResponse(zip_bytes, content_type="application/zip")
+        filename = (
+            "sample_submission_with_model.zip"
+            if mode == "with-model"
+            else "sample_submission_code_only.zip"
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
     def get_queryset(self):
 
@@ -651,8 +741,8 @@ class CompetitionViewSet(ModelViewSet):
     @extend_schema(responses={200: FrontPageCompetitionsSerializer})
     @action(detail=False, methods=('GET',), permission_classes=(AllowAny,))
     def front_page(self, request):
-        popular_comps = get_popular_competitions()
-        recent_comps = get_recent_competitions(exclude_comps=popular_comps)
+        popular_comps = []
+        recent_comps = get_recent_competitions(limit=8)
         popular_comps_serializer = CompetitionSerializerSimple(popular_comps, many=True)
         recent_comps_serializer = CompetitionSerializerSimple(recent_comps, many=True)
         return Response(data={

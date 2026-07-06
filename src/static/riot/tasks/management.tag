@@ -1,22 +1,28 @@
 <task-management>
-    <div class="ui icon input">
-        <input type="text" placeholder="Search by name..." ref="search" onkeyup="{filter.bind(this, undefined)}">
-        <i class="search icon"></i>
+    <div class="rm-toolbar">
+        <div class="rm-toolbar-filters">
+            <div class="ui icon input">
+                <input type="text" placeholder="Search by name..." ref="search" onkeyup="{filter.bind(this, undefined)}">
+                <i class="search icon"></i>
+            </div>
+            <div class="ui checkbox" onclick="{ filter.bind(this, undefined) }">
+                <label>Show Public Tasks</label>
+                <input type="checkbox" ref="public">
+            </div>
+        </div>
+        <div class="rm-toolbar-actions">
+            <button class="ui red labeled icon button {disabled: marked_tasks.length === 0}" onclick="{delete_tasks}">
+                <i class="icon delete"></i>
+                Delete Selected Tasks
+            </button>
+            <div class="ui blue labeled icon button" onclick="{ show_upload_task_modal }"><i class="upload icon"></i>
+                Upload Task
+            </div>
+            <div selenium="create-task" class="ui green labeled icon button" onclick="{ show_modal }"><i class="add circle icon"></i>
+                Create Task
+            </div>
+        </div>
     </div>
-    <div class="ui checkbox" onclick="{ filter.bind(this, undefined) }">
-        <label>Show Public Tasks</label>
-        <input type="checkbox" ref="public">
-    </div>
-    <div class="ui blue right floated labeled icon button" onclick="{ show_upload_task_modal }"><i class="upload icon"></i>
-        Upload Task
-    </div>
-    <div selenium="create-task" class="ui green right floated labeled icon button" onclick="{ show_modal }"><i class="add circle icon"></i>
-        Create Task
-    </div>
-    <button class="ui red right floated labeled icon button {disabled: marked_tasks.length === 0}" onclick="{delete_tasks}">
-        <i class="icon delete"></i>
-        Delete Selected Tasks
-    </button>
 
     <table id="tasksTable" class="ui {selectable: tasks.length > 0} celled compact sortable table">
         <thead>

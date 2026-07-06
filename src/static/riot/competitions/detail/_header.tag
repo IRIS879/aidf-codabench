@@ -1,101 +1,72 @@
 <comp-detail-header>
-    <div class="ui relaxed grid">
-        <div class="row">
-            <div class="three wide column">
-                <img class="ui medium circular image competition-image"
-                     alt="Competition Logo"
-                     src="{ competition.logo }">
+    <section class="detail-hero-shell">
+        <div class="detail-hero-copy">
+            <div class="detail-hero-kicker">
+                <span class="status-dot"></span>
+                { get_kicker_text() }
             </div>
-            <div class="ten wide column">
-                <div class="ui grid">
-                    <div class="row">
-                        <div class="column">
-                            <div class="competition-name underline">
-                                {competition.title}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="reward-container" if="{competition.reward}">
-                            <img class="reward-icon" src="/static/img/trophy.png">
-                            <div class="reward-text">{competition.reward}</div>
-                        </div>
-                    </div>
-                    <div if="{competition.admin}">
-                        <a href="{URLS.COMPETITION_EDIT(competition.id)}" class="ui button">Edit</a>
-                        <button class="ui small button" onclick="{show_modal.bind(this, '.manage-participants.modal')}">
-                            Participants
-                        </button>
-                        <button class="ui small button" onclick="{show_modal.bind(this, '.manage-submissions.modal')}">
-                            Submissions
-                        </button>
-                        <button class="ui small button" onclick="{show_modal.bind(this, '.manage-competition.modal')}">
-                            Dumps
-                        </button>
-                        <button class="ui small button" onclick="{show_modal.bind(this, '.migration.modal')}">
-                            Migrate
-                        </button>
-                    </div>
-                    <div class="row">
-                        <div class="column">
-                            <!-- Main information -->
-                            <div>
-                                <span class="detail-label">Organized by:</span>
-                                <span class="detail-item"><a href="/profiles/user/{competition.created_by}" target="_BLANK">{competition.owner_display_name}</a></span>
-                                <span if="{competition.contact_email}">(<span class="contact-email">{competition.contact_email}</span>)</span>
-                            </div>
-                            <div>
-                                <span class="detail-label">{has_current_phase(competition) ? 'Current Phase Ends' : 'Current Active Phase'}:</span>
-                                <span class="detail-item">{get_end_date(competition)}</span>
-                            </div>
-                            <div>
-                                <span class="detail-label">Current server time:</span>
-                                <span class="detail-item" id="server_time">{pretty_date(CURRENT_DATE_TIME)}</span>
-                            </div>
-                            <!-- Docker image -->
-                            <div class="competition-secret-key">
-                                <span class="docker-label">Docker image:</span>
-                                <span id="docker-image">{ competition.docker_image }</span>
-                                <span onclick="{copy_docker_url}" class="ui send-pop-docker" data-content="Copied!">
-                                    <i class="ui copy icon"></i>
-                                </span>
-                            </div>
-                            <!-- Secret URL -->
-                            <div class="competition-secret-key" if="{ competition.admin }">
-                                <span class="secret-label">Secret url:</span>
-                                <span id="secret-url">https://{ URLS.SECRET_KEY_URL(competition.id, competition.secret_key) }</span>
-                                <span onclick="{copy_secret_url}" class="ui send-pop-secret" data-content="Copied!">
-                                    <i class="ui copy icon"></i>
-                                </span>
-                            </div>
-                            <!-- Competition Report -->
-                            <div class="competition-secret-key" if="{competition.report}">
-                                <span class="report-label">Competition Report:</span>
-                                <span id="report-url">{ competition.report }</span>
-                                <span onclick="{copy_report_url}" class="ui send-pop-report" data-content="Copied!">
-                                    <i class="ui copy icon"></i>
-                                </span>
+            <h1 class="detail-hero-title">{ competition.title }</h1>
+            <p class="detail-hero-summary">{ get_summary_text() }</p>
 
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="detail-hero-meta">
+                <span>Managed by <a href="/profiles/user/{competition.created_by}" target="_BLANK">{competition.owner_display_name}</a></span>
+                <span>{ competition.submissions_count || 0 } submissions</span>
+                <span>{ get_phase_badge_text() }</span>
             </div>
-            <div class="three wide column">
-                <div class="stat-buttons">
-                    <!--todo: turn cursor: pointer and hover off on these buttons since they are not clickable-->
-                    <div class="ui tiny left labeled fluid button">
-                        <a class="ui tiny basic red label">{competition.participants_count}</a>
-                        <div class="ui tiny red button">Participants</div>
-                    </div>
-                    <div class="ui tiny left labeled fluid button">
-                        <a class="ui tiny basic teal label">{competition.submissions_count}</a>
-                        <div class="ui tiny teal button">Submissions</div>
-                    </div>
-                </div>
+
+            <div if="{ competition.forum_enabled }" class="detail-hero-links">
+                <button class="hero-action-link" onclick="{open_forum}">
+                    Discussion
+                </button>
+            </div>
+
+            <div if="{competition.admin}" class="detail-admin-actions">
+                <a href="{URLS.COMPETITION_EDIT(competition.id)}" class="detail-admin-link">Edit</a>
+                <button class="detail-admin-link" onclick="{show_modal.bind(this, '.manage-participants.modal')}">Participants</button>
+                <button class="detail-admin-link" onclick="{show_modal.bind(this, '.manage-submissions.modal')}">Submissions</button>
+                <button class="detail-admin-link" onclick="{show_modal.bind(this, '.manage-competition.modal')}">Dumps</button>
+                <button class="detail-admin-link" onclick="{show_modal.bind(this, '.migration.modal')}">Migrate</button>
             </div>
         </div>
-    </div>
+
+        <aside class="detail-hero-aside">
+            <div class="detail-logo-panel">
+                <div class="detail-logo-wrap">
+                    <img if="{competition.logo}" class="detail-logo-image" alt="Competition Logo" src="{ competition.logo }">
+                    <div if="{!competition.logo}" class="detail-logo-placeholder">
+                        { get_logo_initials() }
+                    </div>
+                </div>
+                <div class="detail-logo-caption">Test Preview</div>
+            </div>
+
+            <div class="detail-stat-grid">
+                <div class="detail-stat-card">
+                    <div class="detail-stat-label">Submissions</div>
+                    <div class="detail-stat-value">{ competition.submissions_count || 0 }</div>
+                </div>
+                <div class="detail-stat-card">
+                    <div class="detail-stat-label">Participants</div>
+                    <div class="detail-stat-value">{ competition.participants_count || 0 }</div>
+                </div>
+                <div class="detail-stat-card wide">
+                    <div class="detail-stat-label">Current phase</div>
+                    <div class="detail-stat-value compact">{ get_current_phase_name() }</div>
+                </div>
+            </div>
+
+            <div if="{competition.report}" class="detail-info-panel">
+                <div class="detail-info-row">
+                    <span class="detail-info-label">Report</span>
+                    <span class="detail-info-value mono" id="report-url">{ competition.report }</span>
+                    <button class="copy-mini" onclick="{copy_report_url}" title="Copy report URL">
+                        <i class="ui copy icon"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </section>
+
     <!-- Manage Competition Modal -->
     <div class="ui manage-competition modal" ref="files_modal">
         <div class="content">
@@ -103,23 +74,14 @@
                 <i class="download icon"></i>
                 <div class="text">Create Competition Dump</div>
                 <div class="menu">
-                    <div class="parent-modal item"
-                        onclick="{create_dump.bind(this, true)}"> 
-                        <!--  true for keys  -->
+                    <div class="parent-modal item" onclick="{create_dump.bind(this, true)}">
                         Dump with keys
                     </div>
-                    <div class="parent-modal item"
-                    
-                        onclick="{create_dump.bind(this, false)}">
-                        <!--  false for files  -->
+                    <div class="parent-modal item" onclick="{create_dump.bind(this, false)}">
                         Dump with files
                     </div>
                 </div>
             </div>
-
-            <!--  <button class="ui icon button" onclick="{create_dump}">
-                <i class="download icon"></i> Create Competition Dump
-            </button>  -->
             <button class="ui icon button" onclick="{update_files}">
                 <i class="sync alternate icon"></i> Refresh Table
             </button>
@@ -158,6 +120,7 @@
             </table>
         </div>
     </div>
+
     <!-- Manage Submissions Modal -->
     <div class="ui manage-submissions large modal" ref="sub_modal">
         <div class="content">
@@ -178,18 +141,14 @@
             <table class="ui table">
                 <thead>
                 <tr>
-                    <th colspan="100%">
-                        Please Choose a phase to migrate
-                    </th>
+                    <th colspan="100%">Please Choose a phase to migrate</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr each="{phase, index in competition.phases}">
                     <td>{phase.name}</td>
                     <td class="collapsing">
-                        <button if="{index !== competition.phases.length - 1}"
-                                class="ui button"
-                                onclick="{migrate_phase.bind(this, phase.id)}">
+                        <button if="{index !== competition.phases.length - 1}" class="ui button" onclick="{migrate_phase.bind(this, phase.id)}">
                             Migrate
                         </button>
                     </td>
@@ -198,12 +157,12 @@
             </table>
         </div>
     </div>
+
     <script>
         let self = this
 
         self.competition = {}
         self.files = []
-
         self.tr_show = false
 
         CODALAB.events.on('competition_loaded', function (competition) {
@@ -219,6 +178,10 @@
         self.close_modal = selector => $(selector).modal('hide')
         self.show_modal = selector => $(selector).modal('show')
 
+        self.open_forum = function () {
+            window.location.href = URLS.FORUM(self.competition.forum)
+        }
+
         self.create_dump = (keys_instead_of_files) => {
             CODALAB.api.create_competition_dump(self.competition.id, keys_instead_of_files)
                 .done(data => {
@@ -231,7 +194,7 @@
                 })
         }
 
-        self.update_files = (e) => {
+        self.update_files = () => {
             CODALAB.api.get_competition_files(self.competition.id)
                 .done(data => {
                     self.files = data
@@ -243,50 +206,52 @@
                 })
         }
 
-
-        self.copy_secret_url = function () {
-            let range = document.createRange();
-            range.selectNode(document.getElementById("secret-url"));
-            window.getSelection().removeAllRanges(); // clear current selection
-            window.getSelection().addRange(range); // to select text
-            document.execCommand("copy");
-            window.getSelection().removeAllRanges();// to deselect
-            $('.send-pop-secret').popup('toggle')
-        }
-
-        self.copy_docker_url = function () {
-            let range = document.createRange();
-            range.selectNode(document.getElementById("docker-image"));
-            window.getSelection().removeAllRanges(); // clear current selection
-            window.getSelection().addRange(range); // to select text
-            document.execCommand("copy");
-            window.getSelection().removeAllRanges();// to deselect
-            $('.send-pop-docker').popup('toggle')
-        }
-
         self.copy_report_url = function () {
-            let range = document.createRange();
-            range.selectNode(document.getElementById("report-url"));
-            window.getSelection().removeAllRanges(); // clear current selection
-            window.getSelection().addRange(range); // to select text
-            document.execCommand("copy");
-            window.getSelection().removeAllRanges();// to deselect
-            $('.send-pop-report').popup('toggle')
+            let range = document.createRange()
+            range.selectNode(document.getElementById("report-url"))
+            window.getSelection().removeAllRanges()
+            window.getSelection().addRange(range)
+            document.execCommand("copy")
+            window.getSelection().removeAllRanges()
         }
 
-        self.has_current_phase = function (competition) {
-            let current_phase = _.find(competition.phases, {status: 'Current'})
-            return current_phase ? true : false
-        }
-
-        self.get_end_date = function (competition) {
-            if(self.has_current_phase(competition)){
-                let end_date = _.get(_.find(competition.phases, {status: 'Current'}), 'end')
-                return end_date ? pretty_date(end_date) : 'Never'
-            }else{
-                return 'None'
+        self.get_summary_text = function () {
+            const summary = (self.competition.description || '').trim()
+            if (summary) {
+                return summary
             }
-            
+            const firstPage = _.get(self.competition, 'pages[0].content', '')
+            if (firstPage) {
+                return firstPage.replace(/[#>*`_\-\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) + '...'
+            }
+            return 'Review the task setup, submit artifacts, and inspect results from one cleaner evaluation page.'
+        }
+
+        self.get_current_phase = function () {
+            return _.find(self.competition.phases, {status: 'Current'}) || _.find(self.competition.phases, {is_final_phase: true}) || _.head(self.competition.phases)
+        }
+
+        self.get_current_phase_name = function () {
+            const phase = self.get_current_phase()
+            return phase ? phase.name : 'Not available'
+        }
+
+        self.get_phase_badge_text = function () {
+            const phase = self.get_current_phase()
+            if (!phase) {
+                return 'Schedule not available'
+            }
+            return phase.end ? `${phase.name} ends ${pretty_date(phase.end)}` : `${phase.name} is open`
+        }
+
+        self.get_kicker_text = function () {
+            const phase = self.get_current_phase()
+            return phase ? `AIDF TEST · ${phase.status}` : 'AIDF TEST'
+        }
+
+        self.get_logo_initials = function () {
+            const words = (self.competition.title || 'AIDF Test').split(/\s+/).filter(Boolean)
+            return words.slice(0, 2).map(word => word.charAt(0)).join('').toUpperCase()
         }
 
         self.migrate_phase = function (phase_id) {
@@ -299,101 +264,243 @@
                     toastr.error('Something went wrong trying to migrate this phase.')
                 })
         }
-
     </script>
 
     <style type="text/stylus">
-        $blue = #2c3f4c
-        $teal = #00bbbb
-        $lightblue = #f2faff
-        $red = #DB2828
+        .detail-hero-shell
+            max-width 1240px
+            margin 32px auto 18px
+            padding 0 24px
+            display grid
+            grid-template-columns minmax(0, 1.5fr) 360px
+            align-items start
+            gap 24px
 
-        .detail-label
-            font-size 1.25em
+        .detail-hero-copy
+            padding 18px 0 0
+
+        .detail-hero-kicker
+            display inline-flex
+            align-items center
+            gap 10px
+            padding 8px 14px
+            border-radius 999px
+            background rgba(31, 78, 145, 0.08)
+            color #234c88
+            font-size 12px
+            font-weight 700
+            letter-spacing 0.12em
             text-transform uppercase
-            color $teal
-            font-family 'Overpass Mono', monospace
 
-        .detail-item
-            font-size 1.25em
-            color $blue
-            text-transform capitalize
-            font-family 'Overpass Mono', monospace
+        .status-dot
+            width 8px
+            height 8px
+            border-radius 50%
+            background #f59f00
+            box-shadow 0 0 0 6px rgba(245, 159, 0, 0.15)
 
-        .competition-secret-key
-            font-size 13px
-
-        .contact-email
-            font-size 1em
-            color $teal
-            font-family 'Overpass Mono', monospace
-
-        .secret-label
-            color $red
-
-        .docker-label
-            color $teal
-
-        .report-label
-            color $teal
-
-        .secret-url
-            color $blue
-
-        .competition-name
-            color $blue
-            font-size 3em
-            height auto
-            line-height 1.1em
-            text-transform uppercase
+        .detail-hero-title
+            margin 16px 0 12px
+            color #102947
+            font-size 46px
+            line-height 1.08
             font-weight 800
 
-        .copy.icon
+        .detail-hero-summary
+            max-width 760px
+            margin 0
+            color #557195
+            font-size 17px
+            line-height 1.65
+
+        .detail-hero-meta
+            display flex
+            flex-wrap wrap
+            gap 10px 18px
+            margin-top 18px
+            color #4f6788
+            font-size 14px
+            font-weight 600
+
+            a
+                color #1b4f92
+
+        .detail-hero-links
+            display flex
+            flex-wrap wrap
+            align-items center
+            gap 12px
+            margin-top 26px
+
+        .hero-action-link
+            padding 0
+            background transparent
+            color #184a86
+            font-size 15px
+            font-weight 700
+            border none
+            cursor pointer
+            transition color 0.2s ease, transform 0.2s ease
+
+        .hero-action-link:hover
+            transform translateY(-1px)
+            color #0f3c72
+
+        .detail-admin-actions
+            display flex
+            flex-wrap wrap
+            gap 10px
+            margin-top 18px
+
+        .detail-admin-link
+            padding 8px 12px
+            border-radius 999px
+            border 1px solid rgba(24, 74, 134, 0.12)
+            background #fff
+            color #335882
+            font-size 13px
+            font-weight 700
             cursor pointer
 
-        .competition-image
-            box-shadow 3px 3px 5px darkgrey
-
-        .underline
-            border-bottom 1px solid $teal
-            display inline-block
-            line-height 0.9em
-
-        .tiny.left.labeled.button
+        .detail-hero-aside
             display flex
-            margin-top 15px
-            justify-content flex-end
+            flex-direction column
+            gap 16px
 
-            .ui.tiny.button
-                width 120px
-                text-transform uppercase
-                font-weight 100
+        .detail-logo-panel,
+        .detail-info-panel
+            background #fff
+            border 1px solid rgba(28, 84, 149, 0.1)
+            border-radius 26px
+            box-shadow 0 20px 40px rgba(27, 63, 106, 0.08)
 
-        .ui.table
-            color $blue !important
+        .detail-logo-panel
+            padding 18px
 
-            thead > tr > th
-                color $blue !important
-                background-color $lightblue !important
-
-        .reward-container
-            background linear-gradient(to right, #ff9966, #ff5e62)
-            color #fff
-            border 1px solid #E6E9EB
-            border-radius 5px
-            padding 10px
+        .detail-logo-wrap
             display flex
             align-items center
-            margin-left 1rem
+            justify-content center
+            min-height 188px
+            border-radius 20px
+            background linear-gradient(180deg, #f7fbff, #edf4fb)
+            border 1px solid rgba(27, 63, 106, 0.08)
 
-        .reward-icon
-            width 40px
-            height 40px
-            margin-right 10px
+        .detail-logo-image
+            max-width 100%
+            max-height 150px
+            object-fit contain
 
-        .reward-text
-            font-size 24px
-            font-weight 900
-            display inline-block
+        .detail-logo-placeholder
+            width 108px
+            height 108px
+            border-radius 28px
+            display flex
+            align-items center
+            justify-content center
+            background linear-gradient(135deg, #1d5aa7, #133f77)
+            color #fff
+            font-size 34px
+            font-weight 800
+
+        .detail-logo-caption
+            margin-top 12px
+            color #5e7899
+            font-size 13px
+            text-align center
+            letter-spacing 0.08em
+            text-transform uppercase
+
+        .detail-stat-grid
+            display grid
+            grid-template-columns repeat(2, minmax(0, 1fr))
+            gap 14px
+
+        .detail-stat-card
+            padding 18px 18px 20px
+            border-radius 20px
+            background linear-gradient(180deg, #1d5aa7, #133f77)
+            color #fff
+            box-shadow 0 16px 28px rgba(19, 63, 119, 0.18)
+
+        .detail-stat-card.wide
+            grid-column 1 / -1
+
+        .detail-stat-label
+            font-size 12px
+            letter-spacing 0.08em
+            text-transform uppercase
+            color rgba(255, 255, 255, 0.74)
+
+        .detail-stat-value
+            margin-top 8px
+            font-size 28px
+            line-height 1.15
+            font-weight 800
+
+        .detail-stat-value.compact
+            font-size 20px
+
+        .detail-info-panel
+            padding 18px
+
+        .detail-info-row
+            display grid
+            grid-template-columns 90px minmax(0, 1fr) auto
+            gap 10px
+            align-items start
+            padding 12px 0
+            border-bottom 1px solid rgba(27, 63, 106, 0.08)
+
+        .detail-info-row:last-child
+            border-bottom none
+
+        .detail-info-label
+            color #7390b1
+            font-size 12px
+            font-weight 800
+            letter-spacing 0.08em
+            text-transform uppercase
+
+        .detail-info-value
+            color #233e5e
+            font-size 13px
+            line-height 1.6
+            word-break break-word
+
+        .detail-info-value.mono
+            font-family 'Consolas', 'Monaco', monospace
+
+        .copy-mini
+            width 30px
+            height 30px
+            border none
+            border-radius 10px
+            background #eef5fb
+            color #1d5aa7
+            cursor pointer
+
+        @media only screen and (max-width: 1024px)
+            .detail-hero-shell
+                grid-template-columns 1fr
+
+        @media only screen and (max-width: 767px)
+            .detail-hero-shell
+                padding 0 16px
+
+            .detail-hero-title
+                font-size 34px
+
+            .detail-hero-summary
+                font-size 16px
+
+            .detail-stat-grid
+                grid-template-columns 1fr
+
+            .detail-stat-card.wide
+                grid-column auto
+
+            .detail-info-row
+                grid-template-columns 1fr
     </style>
 </comp-detail-header>

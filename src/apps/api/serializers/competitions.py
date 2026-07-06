@@ -549,6 +549,7 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
     created_by = serializers.CharField(source='created_by.username', read_only=True)
     owner_display_name = serializers.SerializerMethodField()
     participants_count = serializers.IntegerField(read_only=True)
+    public_participants_count = serializers.SerializerMethodField()
     logo = StorageImageURLField(read_only=True, allow_null=True)
     logo_icon = StorageImageURLField(read_only=True, allow_null=True)
 
@@ -562,6 +563,7 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
             'created_when',
             'published',
             'participants_count',
+            'public_participants_count',
             'logo',
             'logo_icon',
             'description',
@@ -579,6 +581,16 @@ class CompetitionSerializerSimple(serializers.ModelSerializer):
 
     def get_owner_display_name(self, obj):
         return obj.created_by.display_name if obj.created_by.display_name else obj.created_by.username
+
+    def get_public_participants_count(self, obj):
+        collaborator_ids = obj.collaborators.values_list('id', flat=True)
+        return obj.participants.filter(
+            status=CompetitionParticipant.APPROVED
+        ).exclude(
+            user_id=obj.created_by_id
+        ).exclude(
+            user_id__in=collaborator_ids
+        ).count()
 
 
 PageSerializer.competition = CompetitionSerializer(many=True, source='competition')

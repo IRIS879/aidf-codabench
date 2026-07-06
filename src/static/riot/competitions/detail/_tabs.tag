@@ -2,11 +2,10 @@
     <div class="ui grid comp-tabs">
         <!-- Tab menu -->
         <div class="ui tiny fluid four secondary pointing tabular menu details-menu">
-            <!-- <div class="item" data-tab="home-tab">Home</div> -->
-            <div class="item" data-tab="pages-tab">Get Started</div>
-            <div class="item" data-tab="phases-tab">Phases</div>
-            <div class="item" data-tab="participate-tab">My Submissions</div>
-            <div class="item" data-tab="results-tab">Results</div>
+            <div class="item" data-tab="pages-tab">Overview</div>
+            <div class="item" data-tab="phases-tab">Schedule</div>
+            <div class="item" data-tab="participate-tab">Submit</div>
+            <div class="item" data-tab="results-tab">Leaderboard</div>
             <a if="{ competition.forum_enabled }" class="item" href="{URLS.FORUM(competition.forum)}">Forum</a>
             <div class="right menu">
                 <div class="item">
@@ -33,8 +32,8 @@
                                  data-tab="_tab_page_term">
                                 Terms
                             </div>
-                            <div  if={competition.files && competition.files.length != 0} class="{active: _.get(competition.pages, 'length') === 0} item" data-tab="files">
-                                Files
+                            <div class="{active: _.get(competition.pages, 'length') === 0} item" data-tab="files">
+                                Resources
                             </div>
                         </div>
                     </div>
@@ -54,6 +53,55 @@
                         <!--  Files page  -->
                         <div class="ui tab {active: _.get(competition.pages, 'length') === 0}" data-tab="files">
                             <div class="ui" id="files">
+                                <div class="ui info message resources-message">
+                                    <div class="header">Submission Resources</div>
+                                    <p>Download templates and sample packages here before preparing your submission.</p>
+                                    <div class="resources-group" if="{ competition.enable_model_card_submission }">
+                                        <div class="resources-group-title">Model Card Templates</div>
+                                        <div class="ui small buttons resource-buttons">
+                                            <a class="ui button"
+                                               href="/static/model-cards/model_card_template.docx"
+                                               target="_blank"
+                                               rel="noopener noreferrer">
+                                                <i class="download icon"></i>
+                                                DOCX Template
+                                            </a>
+                                            <a class="ui button"
+                                               href="/static/model-cards/model_card_template.json"
+                                               target="_blank"
+                                               rel="noopener noreferrer">
+                                                <i class="download icon"></i>
+                                                JSON Template
+                                            </a>
+                                            <a class="ui button"
+                                               href="/static/model-cards/model_card_template.md"
+                                               target="_blank"
+                                               rel="noopener noreferrer">
+                                                <i class="download icon"></i>
+                                                Markdown Template
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div class="resources-group">
+                                        <div class="resources-group-title">Sample Submission Packages</div>
+                                        <div class="ui small buttons resource-buttons">
+                                            <a class="ui button"
+                                               href="{ get_sample_submission_url('code-only') }"
+                                               target="_blank"
+                                               rel="noopener noreferrer">
+                                                <i class="download icon"></i>
+                                                Code Only Sample
+                                            </a>
+                                            <a class="ui button"
+                                               href="{ get_sample_submission_url('with-model') }"
+                                               target="_blank"
+                                               rel="noopener noreferrer">
+                                                <i class="download icon"></i>
+                                                Sample with model.pkl
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
                                 <!--  Login message if not loggedin  -->
                                 <div if="{!CODALAB.state.user.logged_in}" class="ui yellow message">
                                     <a href="{URLS.LOGIN}?next={location.pathname}">Log In</a> or
@@ -173,25 +221,30 @@
                 <loader></loader>
             </div>
             <!-- Tab Content !-->
-            <div show="{!loading}">
-                <div class="ui button-container inline">
-                    <div class="ui button {active: selected_phase_index == phase.id}"
-                         each="{ phase in competition.phases }"
-                         onclick="{ phase_selected.bind(this, phase) }">{ phase.name }
-                    </div>
-                </div>
-                    <div show="{competition.admin}" class="float-right">
-                        <a href="{ get_phase_leaderboard_pdf_url() }"
-                           target="new"
-                           class="ui primary button leaderboard-pdf-button">
-                            <i class="file pdf icon"></i> Leaderboard PDF
-                        </a>
-                        <div class="ui compact menu">
-                            <div class="ui simple dropdown item" style="padding: 0px 5px">
-                                <i class="download icon" style="font-size: 1.5em; margin: 0;"></i>
-                                <div style="padding-top: 8px; right: 0; left: auto;" class="menu">
-                                    <a href="{URLS.COMPETITION_GET_ZIP(competition.id)}" target="new" class="item">All CSV</a>
-                                    <a href="{URLS.COMPETITION_GET_JSON(competition.id)}" target="new" class="item">All JSON</a>
+                <div show="{!loading}" class="results-shell">
+                    <div class="leaderboard-topbar">
+                        <div class="ui button-container inline leaderboard-phase-group">
+                            <div class="ui button {active: selected_phase_index == phase.id}"
+                                 each="{ phase in competition.phases }"
+                                 onclick="{ phase_selected.bind(this, phase) }">{ phase.name }
+                            </div>
+                        </div>
+                        <div show="{competition.admin}" class="leaderboard-admin-actions">
+                            <a href="{ get_phase_leaderboard_pdf_url() }"
+                               target="new"
+                               class="ui primary button leaderboard-pdf-button">
+                                <i class="file pdf icon"></i>
+                                <span>Leaderboard PDF</span>
+                            </a>
+                            <div class="ui compact menu leaderboard-export-menu">
+                                <div class="ui simple dropdown item leaderboard-export-trigger">
+                                    <i class="download icon"></i>
+                                    <span>Export</span>
+                                    <i class="dropdown icon"></i>
+                                    <div class="menu">
+                                        <a href="{URLS.COMPETITION_GET_ZIP(competition.id)}" target="new" class="item">All CSV</a>
+                                        <a href="{URLS.COMPETITION_GET_JSON(competition.id)}" target="new" class="item">All JSON</a>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -466,6 +519,10 @@
             return `/api/phases/${self.selected_phase_index}/leaderboard-pdf/`
         }
 
+        self.get_sample_submission_url = function (mode) {
+            return `/api/competitions/${self.competition.id}/sample-submission/?mode=${mode}`
+        }
+
         self.update()
 
 
@@ -480,37 +537,83 @@
             overflow auto
 
         .comp-tabs
-            margin-top 1em !important
+            max-width 1240px
+            margin 0 auto 56px !important
+            padding 0 24px
+
+        .ui.grid.comp-tabs
+            width 100%
 
         .ui.secondary.pointing.menu .active.item
-            border-color rgba(42, 68, 88, .5)
-            color rgb(42, 68, 88)
+            border-color #1d5aa7
+            color #163a67
 
         .ui.secondary.pointing.menu .active.item:hover
-            border-color rgba(42, 68, 88, .5)
-            color rgb(42, 68, 88)
+            border-color #1d5aa7
+            color #163a67
 
         .inline
             display inline-block
 
-        .float-right
-            float right
-            display flex
-            align-items center
-            gap 8px
-
         .leaderboard-pdf-button
             margin-right 0 !important
+            display inline-flex !important
+            align-items center
+            gap 8px
+            border-radius 999px !important
+            padding 12px 18px !important
+            box-shadow 0 12px 24px rgba(16, 41, 71, 0.10)
+
+        .resources-message
+            margin-bottom 18px !important
+
+        .resources-group
+            margin-top 14px
+
+        .resources-group:first-of-type
+            margin-top 10px
+
+        .resources-group-title
+            font-size 13px
+            font-weight 700
+            color #35577d
+            margin-bottom 8px
+
+        .resource-buttons
+            margin-top 10px
+            flex-wrap wrap
 
         .details-menu
             width 100%
+            display flex !important
+            align-items center
+            gap 8px
+            padding 12px 14px
+            margin 0 0 22px !important
+            border-radius 20px
+            background linear-gradient(180deg, #ffffff, #f6faff)
+            border 1px solid rgba(27, 63, 106, 0.08)
+            box-shadow 0 18px 36px rgba(16, 41, 71, 0.06)
 
         .details-menu .item
-            font-size 1.3em
+            font-size 15px
+            font-weight 700
+            color #4f6788 !important
+            border-radius 12px !important
+            padding 12px 16px !important
+            transition background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease
 
         .details-menu .active.item, .details-menu .item
-            margin -2px auto !important
+            margin 0 !important
             cursor pointer
+
+        .details-menu .active.item
+            background rgba(29, 90, 167, 0.1) !important
+            box-shadow inset 0 -2px 0 #1d5aa7
+
+        .details-menu .item:hover
+            background rgba(29, 90, 167, 0.06) !important
+            color #163a67 !important
 
         .home-tab
             padding 2em 0.5em
@@ -553,37 +656,156 @@
         .submission-tab
             margin 0 auto
             width 100%
+            background #fff
+            border-radius 26px
+            border 1px solid rgba(27, 63, 106, 0.08)
+            box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+            padding 24px
+
+            .button-container
+                display flex
+                flex-wrap wrap
+                gap 10px
+                margin-bottom 18px
+
+                .ui.button
+                    border-radius 999px
+                    background #eef5fb
+                    color #1d5aa7
+                    border 1px solid rgba(29, 90, 167, 0.12)
+                    box-shadow none
+                    font-weight 700
+
+                .ui.button.active
+                    background linear-gradient(180deg, #1d5aa7, #133f77)
+                    color #fff
 
         .results-tab
             margin 0 auto
             width 100%
+            background #fff
+            border-radius 26px
+            border 1px solid rgba(27, 63, 106, 0.08)
+            box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+            padding 24px
+
+            .button-container
+                display flex
+                flex-wrap wrap
+                gap 10px
+                margin-bottom 20px
+
+                .ui.button
+                    border-radius 999px
+                    background #eef5fb
+                    color #1d5aa7
+                    border 1px solid rgba(29, 90, 167, 0.12)
+                    box-shadow none
+                    font-weight 700
+
+                .ui.button.active
+                    background linear-gradient(180deg, #1d5aa7, #133f77)
+                    color #fff
+
+            .results-shell
+                width 100%
+
+            .leaderboard-topbar
+                display flex
+                justify-content space-between
+                align-items flex-start
+                flex-wrap wrap
+                gap 16px
+                margin-bottom 18px
+
+            .leaderboard-phase-group
+                margin-bottom 0
+                flex 1 1 480px
+
+            .leaderboard-admin-actions
+                display flex
+                align-items center
+                justify-content flex-end
+                flex-wrap wrap
+                gap 10px
+                flex 0 0 auto
+                margin-left auto
+
+            .leaderboard-export-menu
+                margin 0 !important
+                border none !important
+                box-shadow none !important
+                background transparent !important
+
+            .leaderboard-export-trigger
+                display inline-flex !important
+                align-items center
+                gap 8px
+                border-radius 999px !important
+                padding 12px 16px !important
+                background #f7fbff !important
+                border 1px solid rgba(29, 90, 167, 0.12) !important
+                color #1d5aa7 !important
+                font-weight 700 !important
+                box-shadow 0 10px 22px rgba(16, 41, 71, 0.06)
+
+            .leaderboard-export-trigger .icon
+                margin 0 !important
+
+            .leaderboard-export-trigger > .menu
+                margin-top 8px !important
+                right 0 !important
+                left auto !important
+                border-radius 16px !important
+                overflow hidden
+                border 1px solid rgba(27, 63, 106, 0.10) !important
+                box-shadow 0 18px 34px rgba(16, 41, 71, 0.10) !important
 
         .pages-tab
             margin 0 auto
             width 100%
+            background #fff
+            border-radius 26px
+            border 1px solid rgba(27, 63, 106, 0.08)
+            box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+            padding 28px
 
             .ui.vertical.tabular.menu.pages-menu
                 width 100% !important
-                padding-right 3px
+                padding-right 10px
+                border none
 
             .vertical.tabular.menu > .item
                 cursor pointer
+                border-radius 14px !important
+                color #547092
+                margin-bottom 10px
+                background #f7fbff
+                border 1px solid rgba(27, 63, 106, 0.08)
+                font-weight 700
 
             .vertical.tabular.menu > .active.item
                 z-index 1
+                background linear-gradient(180deg, #1d5aa7, #133f77)
+                color #fff !important
+                border-color transparent
 
             .twelve.wide.column .tab.active
                 z-index 0
                 background-color white
-                margin 0 -2.9em
-                padding 2em
-                border solid 1px gainsboro
+                margin 0
+                padding 10px 0 0
+                border none
 
         .phases-tab
             margin 0 auto
             width 100%
             color #2c3f4c
-            padding 50px 0 150px
+            background #fff
+            border-radius 26px
+            border 1px solid rgba(27, 63, 106, 0.08)
+            box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+            padding 28px
 
             .underline
                 border-bottom 1px solid $teal
@@ -596,33 +818,39 @@
 
             .ui.styled.accordion
                 width 100%
+                border-radius 18px
+                border 1px solid rgba(27, 63, 106, 0.08)
+                overflow hidden
 
             .phase-header
                 font-family 'Roboto', sans-serif
                 font-size 20px !important
-                text-transform uppercase
+                text-transform none
                 font-weight 600
-                background-color #e5fbfa
-                color $blue !important
+                background-color #f6faff
+                color #12365f !important
 
             .ui.styled.accordion .phase-header.active
-                color rgb(44, 63, 76) !important
-                border-bottom solid 1px gainsboro !important
-                background rgba(5, 181, 173, 65) !important
+                color #12365f !important
+                border-bottom solid 1px rgba(27, 63, 106, 0.08) !important
+                background rgba(29, 90, 167, 0.10) !important
 
             .phase-header:hover
-                color rgb(44, 63, 76) !important
-                background rgba(5, 181, 173, 65) !important
+                color #12365f !important
+                background rgba(29, 90, 167, 0.08) !important
 
             .phase-label
                 font-size 15px
                 font-weight 600
                 font-family 'Roboto', sans-serif
-                color $teal
+                color #1d5aa7
                 text-transform uppercase
 
             .phase-info
                 margin-bottom 10px
+
+            .content.active
+                background #fff
 
         .admin-tab
             margin 0 auto
@@ -655,6 +883,31 @@
             .medal
                 height 25px
                 width auto
+
+        @media only screen and (max-width: 767px)
+            .comp-tabs
+                padding 0 16px
+
+            .details-menu
+                flex-wrap wrap
+
+            .details-menu .right.menu
+                width 100%
+                justify-content flex-end
+
+            .pages-tab,
+            .phases-tab,
+            .submission-tab,
+            .results-tab
+                padding 18px
+
+            .results-tab .leaderboard-topbar
+                align-items stretch
+
+            .results-tab .leaderboard-admin-actions
+                width 100%
+                justify-content flex-start
+                margin-left 0
 
     </style>
 </comp-tabs>

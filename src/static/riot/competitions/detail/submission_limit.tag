@@ -4,9 +4,6 @@
         <div class="col">
             <div class="col-content">
                 Number of submissions used for the day
-                <a class="float-left" data-tooltip="The submission limit resets at midnight server time." data-position="right center">
-                    <i class="grey question circle icon"></i>
-                </a>
             </div>
             <!-- Badge for when there is a limit -->
             <span if="{selected_phase.max_submissions_per_day > 0}" class="badge {badgeColor(selected_phase.used_submissions_per_day, selected_phase.max_submissions_per_day)}">

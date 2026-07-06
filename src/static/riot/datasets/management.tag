@@ -1,31 +1,36 @@
 <data-management>
     <!-- Search and filter bits -->
-      
-    <div class="ui icon input">
-        <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
-        <i class="search icon"></i>
+    <div class="rm-toolbar">
+        <div class="rm-toolbar-filters">
+            <div class="ui icon input">
+                <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
+                <i class="search icon"></i>
+            </div>
+            <select class="ui dropdown" ref="type_filter" onchange="{ filter.bind(this, undefined) }">
+                <option value="">Filter By Type</option>
+                <option value="-">----</option>
+                <option each="{type in types}" value="{type}">{_.startCase(type)}</option>
+            </select>
+            <div class="ui checkbox" onclick="{ filter.bind(this, undefined) }">
+                <label>Show Auto Created</label>
+                <input type="checkbox" ref="auto_created">
+            </div>
+            <div class="ui checkbox inline-div" onclick="{ filter.bind(this, undefined) }">
+                <label>Show Public</label>
+                <input type="checkbox" ref="show_public">
+            </div>
+        </div>
+        <div class="rm-toolbar-actions">
+            <button class="ui red labeled icon button {disabled: marked_datasets.length === 0}" onclick="{delete_datasets}">
+                <i class="icon delete"></i>
+                Delete Selected
+            </button>
+            <button class="ui green labeled icon button" onclick="{show_creation_modal}">
+                <i selenium="add-dataset" class="plus icon"></i>
+                Add Dataset/Program
+            </button>
+        </div>
     </div>
-    <select class="ui dropdown" ref="type_filter" onchange="{ filter.bind(this, undefined) }">
-        <option value="">Filter By Type</option>
-        <option value="-">----</option>
-        <option each="{type in types}" value="{type}">{_.startCase(type)}</option>
-    </select>
-    <div class="ui checkbox" onclick="{ filter.bind(this, undefined) }">
-        <label>Show Auto Created</label>
-        <input type="checkbox" ref="auto_created">
-    </div>
-    <div class="ui checkbox inline-div" onclick="{ filter.bind(this, undefined) }">
-        <label>Show Public</label>
-        <input type="checkbox" ref="show_public">
-    </div>
-    <button class="ui green right floated labeled icon button" onclick="{show_creation_modal}">
-        <i selenium="add-dataset" class="plus icon"></i>
-        Add Dataset/Program
-    </button>
-    <button class="ui red right floated labeled icon button {disabled: marked_datasets.length === 0}" onclick="{delete_datasets}">
-        <i class="icon delete"></i>
-        Delete Selected
-    </button>
 
     <!-- Data Table -->
     <table id="datasetsTable" class="ui {selectable: datasets.length > 0} celled compact sortable table">

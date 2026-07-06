@@ -3,5 +3,27 @@
 {% block title %}Public Tests - AIDF Test Platform{% endblock %}
 
 {% block content %}
-    <public-list></public-list>
+    <div class="home-wrap">
+        <section class="home-intro-band public-tests-hero">
+            <div class="home-intro-copy">
+                <p class="home-intro-kicker">Public Tests</p>
+                <h1>Find available tests, compare requirements, and open the right evaluation flow faster.</h1>
+                <p class="home-intro-lead">Browse the public test catalog, search by title, refine the list with filters, and move directly into the task page when you are ready to submit artifacts or review results.</p>
+            </div>
+            <div class="home-intro-side">
+                <div class="intro-note-card">
+                    <span class="intro-note-label">Directory View</span>
+                    <div class="intro-note-title">One place for test discovery and quick access.</div>
+                    <p>Use this page to search public tests, check basic metadata, and jump into detailed instructions without the extra competition-platform clutter.</p>
+                </div>
+                <div class="intro-chip-row">
+                    <span>Search tests</span>
+                    <span>Filter quickly</span>
+                    <span>Open details</span>
+                </div>
+            </div>
+        </section>
+
+        <public-list></public-list>
+    </div>
 {% endblock %}

@@ -121,6 +121,8 @@
             padding 10px
             text-align center
             font-size 12px
+            border-top-right-radius 14px
+            border-bottom-right-radius 14px
 
         .organizer
             font-size 13px

@@ -32,35 +32,38 @@
             <!-- -->
         </div>
     </div>
-    <div class="ui icon input">
-        <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter }">
-        <i class="search icon"></i>
+    <div class="submission-table-toolbar">
+        <div class="ui icon input submission-search">
+            <input type="text" placeholder="Search submissions..." ref="search" onkeyup="{ filter }">
+            <i class="search icon"></i>
+        </div>
+        <select if="{opts.admin}" class="ui dropdown" ref="phase" onchange="{ filter }">
+            <option value="">Phase</option>
+            <option value=" ">-----</option>
+            <option each="{ phase in opts.competition.phases }" value="{ phase.id }">{ phase.name }</option>
+        </select>
+        <select class="ui dropdown" ref="status" onchange="{ filter }">
+            <option value="">Status</option>
+            <option value=" ">-----</option>
+            <option value="Cancelled">Cancelled</option>
+            <option value="Failed">Failed</option>
+            <option value="Finished">Finished</option>
+            <option value="Preparing">Preparing</option>
+            <option value="Running">Running</option>
+            <option value="Scoring">Scoring</option>
+            <option value="Submitted">Submitted</option>
+            <option value="Submitting">Submitting</option>
+        </select>
+        <div class="ui input" if="{opts.admin}">
+            <input 
+            type="checkbox" 
+            checked="{show_is_soft_deleted}"
+            onclick="{toggleShowSoftDeleted}">
+            <label class="checkbox-label">Show soft-deleted submissions</label>
+        </div>
     </div>
-    <select if="{opts.admin}" class="ui dropdown" ref="phase" onchange="{ filter }">
-        <option value="">Phase</option>
-        <option value=" ">-----</option>
-        <option each="{ phase in opts.competition.phases }" value="{ phase.id }">{ phase.name }</option>
-    </select>
-    <select class="ui dropdown" ref="status" onchange="{ filter }">
-        <option value="">Status</option>
-        <option value=" ">-----</option>
-        <option value="Cancelled">Cancelled</option>
-        <option value="Failed">Failed</option>
-        <option value="Finished">Finished</option>
-        <option value="Preparing">Preparing</option>
-        <option value="Running">Running</option>
-        <option value="Scoring">Scoring</option>
-        <option value="Submitted">Submitted</option>
-        <option value="Submitting">Submitting</option>
-    </select>
-    <div class="ui input" if="{opts.admin}">
-        <input 
-        type="checkbox" 
-        checked="{show_is_soft_deleted}"
-        onclick="{toggleShowSoftDeleted}">
-        <label class="checkbox-label">Show soft-deleted submissions</label>
-    </div>
-    <table class="ui celled selectable sortable table" ref="submission_table">
+    <div class="submission-table-shell">
+    <table class="ui celled selectable sortable table submission-table" ref="submission_table">
         <thead>
             <tr>
                 <th if="{opts.admin}">
@@ -186,6 +189,7 @@
             </tr>
         </tbody>
     </table>
+    </div>
 
     <div class="ui large modal" ref="modal">
         <div class="content">
@@ -790,6 +794,37 @@
         .admin-buttons
             padding-bottom 20px
 
+        .submission-table-toolbar
+            display flex
+            flex-wrap wrap
+            align-items center
+            gap 12px
+            margin 0 0 16px
+
+            .ui.dropdown
+                min-width 160px
+                border-radius 14px !important
+                border 1px solid rgba(27, 63, 106, 0.10) !important
+                box-shadow 0 10px 22px rgba(16, 41, 71, 0.04) !important
+
+        .submission-search
+            min-width 260px
+            border-radius 999px !important
+            overflow hidden
+            border 1px solid rgba(27, 63, 106, 0.10) !important
+            box-shadow 0 10px 22px rgba(16, 41, 71, 0.04) !important
+
+            input
+                border none !important
+                padding 13px 16px !important
+
+        .submission-table-shell
+            border-radius 22px
+            overflow hidden
+            border 1px solid rgba(27, 63, 106, 0.10)
+            box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+            background #fff
+
         .on-leaderboard
             &:hover
                 cursor auto
@@ -798,7 +833,8 @@
         .submission_row
             &:hover
                 cursor pointer
-            height 52px
+                background #f8fbff !important
+            min-height 60px
 
         table tbody .center.aligned td
             color #8c8c8c
@@ -811,5 +847,20 @@
 
         .soft-deleted
             background-color #ffdede !important
+
+        .submission-table
+            margin 0 !important
+            border none !important
+
+            thead th
+                background linear-gradient(180deg, #f7fbff, #edf4fb) !important
+                color #163a67 !important
+                font-weight 800 !important
+                border-bottom 1px solid rgba(27, 63, 106, 0.08) !important
+
+            tbody td
+                padding 14px 12px !important
+                color #395776 !important
+                border-top 1px solid rgba(27, 63, 106, 0.06) !important
     </style>
 </submission-manager>

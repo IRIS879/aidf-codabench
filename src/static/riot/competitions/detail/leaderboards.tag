@@ -32,8 +32,8 @@
     </div>
   </div>
 
-  <div class="ui segment" style="margin-top: 16px;">
-    <table class="ui celled table coda-animated">
+  <div class="lb-table-shell">
+    <table class="ui celled table coda-animated lb-table">
       <thead>
         <tr>
           <th class="center aligned" colspan="5"></th>
@@ -384,7 +384,7 @@
       display block
 
     .index-column
-      width 40px
+      width 56px
 
     .model-card-cell
       white-space nowrap
@@ -398,27 +398,128 @@
       display flex
       align-items center
       flex-wrap wrap
-      gap 12px
-      margin-top 32px
+      gap 14px
+      margin-top 10px
+      margin-bottom 10px
 
     .lb-search
-      width 33%
-      min-width 200px
+      width 420px
+      min-width 240px
+
+      &.ui.left.action.input
+        border-radius 999px
+        overflow hidden
+        border 1px solid rgba(27, 63, 106, 0.12)
+        box-shadow 0 10px 22px rgba(16, 41, 71, 0.05)
+
+        input
+          border none !important
+          background #fff
+          padding 14px 16px
+          font-size 14px
+          color #26486f
+
+        .ui.icon.button
+          background #f4f8fd
+          color #1d5aa7
+          border none
+          width 52px
 
     .lb-sort-group
       display flex
       align-items center
-      gap 8px
+      gap 10px
       margin-left auto
+
+      .ui.small.buttons
+        box-shadow 0 10px 22px rgba(16, 41, 71, 0.05)
+        border-radius 999px
+        overflow hidden
+
+        .ui.button
+          border none
+          background #fff
+          color #436382
+          font-weight 700
+          padding 12px 18px
+
+        .ui.button.active
+          background linear-gradient(180deg, #1d5aa7, #133f77)
+          color #fff
+
+      .or
+        display none
 
     .lb-sort-label
       font-size 13px
-      color rgba(0,0,0,.5)
+      color #6984a4
+      font-weight 700
       white-space nowrap
 
     .lb-sort-indicator
       font-size 10px
       color rgba(0,0,0,.4)
       margin-left 2px
+
+    .lb-table-shell
+      margin-top 18px
+      border-radius 24px
+      overflow hidden
+      border 1px solid rgba(27, 63, 106, 0.10)
+      box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
+      background #fff
+
+    .lb-table
+      margin 0 !important
+      border none !important
+      border-radius 0 !important
+
+      thead tr:first-child th
+        background linear-gradient(180deg, #f7fbff, #edf4fb) !important
+        color #6d85a0 !important
+        font-size 11px
+        letter-spacing 0.08em
+        text-transform uppercase
+        border-bottom 1px solid rgba(27, 63, 106, 0.08) !important
+
+      thead tr:nth-child(2) th
+        background #fff !important
+        color #14385f !important
+        font-weight 800
+        border-bottom 1px solid rgba(27, 63, 106, 0.08) !important
+
+      tbody tr
+        transition background 0.2s ease
+
+      tbody tr:hover
+        background #f8fbff !important
+
+      tbody td
+        padding 16px 14px !important
+        color #395776 !important
+        border-top 1px solid rgba(27, 63, 106, 0.06) !important
+
+      tbody td a
+        color #184a86
+        font-weight 700
+
+    .mc-btn
+      border-radius 999px !important
+      border 1px solid rgba(29, 90, 167, 0.12) !important
+      background #f6faff !important
+      color #184a86 !important
+      font-weight 700 !important
+
+    @media only screen and (max-width: 767px)
+      .lb-toolbar
+        align-items stretch
+
+      .lb-search
+        width 100%
+
+      .lb-sort-group
+        margin-left 0
+        width 100%
+        justify-content space-between
   </style>
 </leaderboards>

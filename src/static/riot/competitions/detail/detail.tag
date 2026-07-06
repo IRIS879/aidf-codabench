@@ -1,7 +1,9 @@
 <competition-detail>
-    <comp-detail-header class="comp-detail-paragraph-text" competition="{ competition }"></comp-detail-header>
-    <comp-detail-timeline class="comp-detail-phases" competition="{ competition }"></comp-detail-timeline>
-    <comp-tabs class="comp-detail-paragraph-text" competition="{ competition }"></comp-tabs>
+    <div class="detail-page-shell">
+        <comp-detail-header class="comp-detail-paragraph-text" competition="{ competition }"></comp-detail-header>
+        <comp-detail-timeline class="comp-detail-phases" competition="{ competition }"></comp-detail-timeline>
+        <comp-tabs class="comp-detail-paragraph-text" competition="{ competition }"></comp-tabs>
+    </div>
     <script>
         var self = this
 
@@ -48,6 +50,11 @@
             display block
             width 100%
             height 100%
+            background linear-gradient(180deg, #f5f9fe 0%, #edf4fb 100%)
+            min-height 100vh
+
+        .detail-page-shell
+            width 100%
 
         .ui.inverted.table
             background #44586b

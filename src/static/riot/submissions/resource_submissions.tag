@@ -1,22 +1,26 @@
 <submission-management>
-
-    <!--  Search -->
-    <div class="ui icon input">
-        <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
-        <i class="search icon"></i>
+    <div class="rm-toolbar">
+        <div class="rm-toolbar-filters">
+            <div class="ui icon input">
+                <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
+                <i class="search icon"></i>
+            </div>
+            <div class="ui checkbox inline-div" onclick="{ filter.bind(this, undefined) }">
+                <label>Show Public</label>
+                <input type="checkbox" ref="show_public">
+            </div>
+        </div>
+        <div class="rm-toolbar-actions">
+            <button class="ui red labeled icon button {disabled: marked_submissions.length === 0}" onclick="{delete_submissions}">
+                <i class="icon delete"></i>
+                Delete Selected Submissions
+            </button>
+            <button class="ui green labeled icon button" onclick="{show_creation_modal}">
+                <i class="plus icon"></i>
+                Add Submission
+            </button>
+        </div>
     </div>
-    <div class="ui checkbox inline-div" onclick="{ filter.bind(this, undefined) }">
-        <label>Show Public</label>
-        <input type="checkbox" ref="show_public">
-    </div>
-    <button class="ui green right floated labeled icon button" onclick="{show_creation_modal}">
-        <i class="plus icon"></i>
-        Add Submission
-    </button>
-    <button class="ui red right floated labeled icon button {disabled: marked_submissions.length === 0}" onclick="{delete_submissions}">
-        <i class="icon delete"></i>
-        Delete Selected Submissions
-    </button>
 
     <!-- Data Table -->
     <table id="submissionsTable" class="ui {selectable: submissions.length > 0} celled compact sortable table">

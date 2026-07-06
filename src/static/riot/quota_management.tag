@@ -1,12 +1,12 @@
 <quota-management>
    
-    <div class="ui segment p-4">
-        <div class="ui" style="display: flex; flex-direction: row; align-items: center;">
+    <div class="ui segment p-4 quota-card">
+        <div class="ui quota-header" style="display: flex; flex-direction: row; align-items: center;">
             <!--  Title  -->
             <h2 style="margin-bottom: 0;">Quota and Cleanup</h2>
 
             <!--  Quota  -->
-            <div style="flex: 0 0 auto; margin-left: auto;">
+            <div class="quota-badge" style="flex: 0 0 auto; margin-left: auto;">
                 Quota: {pretty_bytes(storage_used)} / {quota} GB
             </div>
         </div>
@@ -196,5 +196,23 @@
         CODALAB.events.on('reload_quota_cleanup', self.get_cleanup)
 
     </script>
+
+    <style type="text/stylus">
+        .quota-card
+            margin-top 18px !important
+            border 1px solid rgba(19, 47, 94, 0.08) !important
+            border-radius 18px !important
+            box-shadow 0 16px 34px rgba(18, 37, 77, 0.06) !important
+
+        .quota-header
+            margin-bottom 16px
+
+        .quota-badge
+            padding 10px 14px
+            border-radius 999px
+            background #eef4ff
+            color #18355b
+            font-weight 600
+    </style>
 
 </quota-management>

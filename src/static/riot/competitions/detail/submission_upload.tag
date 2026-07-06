@@ -2,41 +2,17 @@
     <div class="ui sixteen wide column submission-container">
 
         <div class="submission-form">
-            <div class="ui grid middle aligned">
-                <div class="sixteen wide column">
-                    <h1 style="margin: 0;">Submission upload</h1>
+            <div class="submission-head">
+                <div class="submission-kicker">Submit</div>
+                <div class="ui grid middle aligned">
+                    <div class="sixteen wide column">
+                        <h1 style="margin: 0;">Upload a new submission</h1>
+                        <p class="submission-intro">
+                            Add the required ZIP file, complete any required metadata, and submit to the active test phase.
+                            Download templates and sample packages from <strong>Overview → Resources</strong>.
+                        </p>
+                    </div>
                 </div>
-            </div>
-
-            <div class="ui segment" style="margin-top: 16px;" if="{ opts.competition && opts.competition.enable_model_card_submission }">
-                <div style="font-weight: 600; margin-bottom: 6px;">Model Card Templates</div>
-                <div style="margin-bottom: 12px; color: rgba(0,0,0,.6);">
-                    Download a template to prepare your model card, or simply fill in the form below.
-                </div>
-                <a class="ui button"
-                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
-                   href="/static/model-cards/model_card_template.docx"
-                   target="_blank"
-                   rel="noopener noreferrer">
-                    <i class="download icon"></i>
-                    DOCX Template
-                </a>
-                <a class="ui button"
-                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
-                   href="/static/model-cards/model_card_template.json"
-                   target="_blank"
-                   rel="noopener noreferrer">
-                    <i class="download icon"></i>
-                    JSON Template
-                </a>
-                <a class="ui button"
-                   style="background:#e0e1e2; color:rgba(0,0,0,.6); margin-bottom:4px;"
-                   href="/static/model-cards/model_card_template.md"
-                   target="_blank"
-                   rel="noopener noreferrer">
-                    <i class="download icon"></i>
-                    Markdown Template
-                </a>
             </div>
 
             <div if="{_.get(selected_phase, 'status') === 'Previous'}" class="ui red message">
@@ -237,10 +213,10 @@
                     </div>
                 </div>
 
-        <div class="field" style="margin-top: 24px;">
+        <div class="field submit-action-row" style="margin-top: 24px;">
             <button
                 type="button"
-                class="ui button"
+                class="ui button submit-primary-btn"
                 onclick="{check_form}"
                 disabled="{is_submitting || _.get(selected_phase, 'status') !== 'Current'}">
                 { is_submitting ? 'Submitting...' : 'Submit' }
@@ -265,51 +241,6 @@
             </ul>
         </div>
 
-        <div class="ui styled fluid accordion submission-output-container">
-
-            <div class="title active">
-                <i class="dropdown icon"></i>
-                Submission logs
-            </div>
-
-            <div class="content active">
-
-                <div id="submission-output" ref="submission_output" class="ui segment coda-animated">
-
-                    <div class="submission-tabs ui top attached tabular menu">
-                        <a class="item active" onclick="{select_tab}" data-tab="prediction">Prediction</a>
-                        <a class="item" onclick="{select_tab}" data-tab="scoring">Scoring</a>
-                    </div>
-
-                    <div class="ui bottom attached tab segment active" data-tab="prediction">
-                        <log_window
-                            selected_submission="{selected_submission}"
-                            selected_tab="prediction"
-                            detailed_result_url="{get_detailed_result_url()}"
-                            show_graph="{opts.competition.enable_detailed_results}">
-                        </log_window>
-                    </div>
-
-                    <div class="ui bottom attached tab segment" data-tab="scoring">
-                        <log_window
-                            selected_submission="{selected_submission}"
-                            selected_tab="scoring"
-                            detailed_result_url="{get_detailed_result_url()}"
-                            show_graph="{opts.competition.enable_detailed_results}">
-                        </log_window>
-                    </div>
-
-                    <div class="ui checkbox" ref="autoscroll_checkbox" style="margin-top: 10px;">
-                        <input type="checkbox" onchange="{toggle_autoscroll}">
-                        <label>Auto-scroll logs</label>
-                    </div>
-
-                </div>
-
-            </div>
-
-        </div>
-
     </div>
 
 <script>
@@ -321,10 +252,8 @@
     self.selected_phase = {}
     self.selected_tasks = []
     self.upload_progress = 0
-    self.autoscroll_selected = false
     self.children = []
     self.organizations = []
-    self.detailed_result_urls = {}
     self.is_submitting = false
 
     // 'form' = fill-in-page, 'upload' = file upload
@@ -355,13 +284,6 @@
             $(self.refs.organization_dropdown).dropdown()
         }
     })
-
-    self.get_detailed_result_url = function () {
-        if (!self.selected_submission || !self.selected_submission.id) {
-            return null
-        }
-        return self.detailed_result_urls[self.selected_submission.id] || null
-    }
 
     self.clear_form = function () {
         console.log("[submission-upload] clear_form")
@@ -792,23 +714,9 @@
         }
     }
 
-    self.toggle_autoscroll = function () {
-        self.autoscroll_selected = !self.autoscroll_selected
-        self.autoscroll_output()
-    }
-
-    self.select_tab = function (e) {
-        var tab = e.item.getAttribute('data-tab')
-        $('.submission-tabs .item', self.root).removeClass('active')
-        $(e.item).addClass('active')
-        $('.tab.segment', self.root).removeClass('active')
-        $('.tab.segment[data-tab="' + tab + '"]', self.root).addClass('active')
-    }
-
     CODALAB.events.on('submission_selected', function (selected_submission) {
         console.log("[submission-upload] event submission_selected", selected_submission)
         self.selected_submission = selected_submission
-        self.autoscroll_output()
         self.update()
     })
 
@@ -818,15 +726,6 @@
         self.update()
     })
 
-    self.autoscroll_output = function () {
-        if (!self.refs.autoscroll_checkbox) {
-            return
-        }
-        if (self.autoscroll_selected) {
-            var output = self.refs.submission_output
-            output.scrollTop = output.scrollHeight
-        }
-    }
 </script>
 
 <style type="text/stylus">
@@ -842,16 +741,39 @@
     color #db2828
 
 .submission-form
-    background-color white
+    background linear-gradient(180deg, #ffffff, #fbfdff)
     padding 2em
-    border solid 1px #dcdcdcdc
+    border 1px solid rgba(27, 63, 106, 0.10)
+    border-radius 24px
+    box-shadow 0 18px 34px rgba(16, 41, 71, 0.06)
     margin-bottom 2em
 
+.submission-head
+    margin-bottom 20px
+
+.submission-kicker
+    margin-bottom 8px
+    color #6f87a3
+    font-size 12px
+    font-weight 800
+    letter-spacing .12em
+    text-transform uppercase
+
+.submission-intro
+    margin-top 10px
+    color #6180a3
+    font-size 14px
+    line-height 1.6
+
 .submission-form-question
-    padding .66em 2em
+    padding 1em 1.2em
+    border-radius 16px
+    background #f8fbff
+    border 1px solid rgba(27, 63, 106, 0.06)
+    margin-bottom 10px
 
     label
-        font-size 16px
+        font-size 15px
         font-weight 600
 
 .submission-upload-section
@@ -864,15 +786,16 @@
 .upload-label
     display block
     font-size 14px
-    font-weight 600
-    margin-bottom .5em
+    font-weight 700
+    margin-bottom .65em
+    color #183d68
 
 .model-card-block
     margin-top 1.5em
-    padding 1em 1.2em
-    border 1px solid #e0e1e2
-    border-radius 4px
-    background #fafafa
+    padding 1.25em 1.3em
+    border 1px solid rgba(27, 63, 106, 0.10)
+    border-radius 20px
+    background linear-gradient(180deg, #f8fbff, #f4f8fd)
 
 .mc-required-star
     color #db2828
@@ -882,11 +805,21 @@
     margin-bottom .8em !important
     font-size 13px
 
+    .item
+        border-radius 12px !important
+        margin-right 8px !important
+        color #587493 !important
+        font-weight 700 !important
+
+    .active.item
+        background rgba(29, 90, 167, 0.10) !important
+        color #184a86 !important
+
 .mc-panel
-    padding-top .5em
+    padding-top .75em
 
 .mc-field
-    margin-bottom .8em
+    margin-bottom 1em
 
     label
         font-size 13px
@@ -897,24 +830,28 @@
 
 .mc-input
     width 100%
-    padding 6px 8px
-    border 1px solid rgba(34,36,38,.15)
-    border-radius 3px
+    padding 12px 14px
+    border 1px solid rgba(27, 63, 106, 0.12)
+    border-radius 14px
     font-size 13px
     outline none
+    background #fff
     &:focus
-        border-color #85b7d9
+        border-color #4b84c4
+        box-shadow 0 0 0 4px rgba(75, 132, 196, 0.12)
 
 .mc-textarea
     width 100%
-    padding 6px 8px
-    border 1px solid rgba(34,36,38,.15)
-    border-radius 3px
+    padding 12px 14px
+    border 1px solid rgba(27, 63, 106, 0.12)
+    border-radius 14px
     font-size 13px
     resize vertical
     outline none
+    background #fff
     &:focus
-        border-color #85b7d9
+        border-color #4b84c4
+        box-shadow 0 0 0 4px rgba(75, 132, 196, 0.12)
 
 .mc-error
     color #db2828
@@ -934,40 +871,25 @@
         color rgba(0,0,0,.75)
 
 .mc-optional-section
-    margin-top 6px
-    padding-top 4px
-    border-top 1px solid rgba(0,0,0,.06)
+    margin-top 10px
+    padding-top 10px
+    border-top 1px solid rgba(27, 63, 106, .08)
 
 .mc-section-header
     font-size 11px
     font-weight 700
     text-transform uppercase
     letter-spacing .05em
-    color rgba(0,0,0,.4)
-    border-bottom 1px solid rgba(0,0,0,.08)
-    padding-bottom 3px
+    color #6b84a1
+    border-bottom 1px solid rgba(27, 63, 106, .08)
+    padding-bottom 6px
     margin-top 12px
-    margin-bottom 8px
+    margin-bottom 10px
 
 .mc-hint
     font-weight 400
     font-size 11px
     color rgba(0,0,0,.4)
-
-#submission-output
-    .submission-tabs
-        overflow-x scroll
-        padding-bottom 10px
-
-        .item
-            border solid 1px #efefef
-            cursor pointer
-
-            &:hover
-                background-color #f5f5f5
-
-        .item.active
-            border solid 1px #03bbbbad
 
 code
     background hsl(220, 80%, 90%)
@@ -978,13 +900,22 @@ code
 .hidden
     display none
 
-.submission-output-container
-    margin-top 15px
+.submit-action-row
+    display flex
+    justify-content flex-start
 
-    .ui.basic.segment
-        min-height 300px
-        display none
-        overflow-y auto
+.submit-primary-btn
+    min-width 160px
+    padding 14px 22px !important
+    border-radius 999px !important
+    background linear-gradient(135deg, #ffb347, #f28c18) !important
+    color #fff !important
+    font-weight 800 !important
+    box-shadow 0 14px 28px rgba(242, 140, 24, 0.22) !important
+
+    &[disabled]
+        opacity .55 !important
+        box-shadow none !important
 
 .graph-container
     display block

@@ -1,13 +1,18 @@
 <bundle-management>
-    <!--  Search -->
-    <div class="ui icon input">
-        <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
-        <i class="search icon"></i>
+    <div class="rm-toolbar">
+        <div class="rm-toolbar-filters">
+            <div class="ui icon input">
+                <input type="text" placeholder="Search..." ref="search" onkeyup="{ filter.bind(this, undefined) }">
+                <i class="search icon"></i>
+            </div>
+        </div>
+        <div class="rm-toolbar-actions">
+            <button class="ui red labeled icon button {disabled: marked_datasets.length === 0}" onclick="{delete_datasets}">
+                <i class="icon delete"></i>
+                Delete Selected
+            </button>
+        </div>
     </div>
-    <button class="ui red right floated labeled icon button {disabled: marked_datasets.length === 0}" onclick="{delete_datasets}">
-        <i class="icon delete"></i>
-        Delete Selected
-    </button>
 
     <!-- Data Table -->
     <table id="bundlesTable" class="ui {selectable: datasets.length > 0} celled compact sortable table">

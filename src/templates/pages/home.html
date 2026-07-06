@@ -11,110 +11,53 @@
 {% block content %}
 
     {% if announcement %}
-    <div style="margin:auto;" class="segment-container ui segment full-width">
-        <div class="ui header">
-            <p>Announcement</p>
-        </div>
-        <div class="container-content">
-            <div class="center aligned column">
-                {{ announcement | safe }}
-            </div>
-        </div>
+    <div class="home-announcement">
+        <span class="announcement-badge">Update</span>
+        <div class="announcement-copy">{{ announcement | safe }}</div>
     </div>
     {% endif %}
 
     <div class="home-wrap">
+        <section class="home-intro-band">
+            <div class="home-intro-copy">
+                <p class="home-intro-kicker">AIDF Test Platform</p>
+                <h1>Browse tests, submit artifacts, and review evaluation results in one place.</h1>
+                <p class="home-intro-lead">Use the platform to find available tests, check submission requirements, upload files or code, and inspect results through a more focused workflow.</p>
+                <div class="home-intro-actions">
+                    <a href="/competitions/public/" class="ui primary button">Browse Tests</a>
+                    {% if user.is_authenticated %}
+                        <a href="/competitions/create/" class="ui button home-intro-secondary">Create a Test</a>
+                    {% else %}
+                        <a href="/accounts/login/" class="ui button home-intro-secondary">Sign In to Create</a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="home-intro-side">
+                <div class="intro-note-card">
+                    <span class="intro-note-label">Platform Snapshot</span>
+                    <div class="intro-note-title">Use the platform to browse tests and review live evaluation activity.</div>
+                    <div class="intro-metric-grid">
+                        <div class="intro-metric-card">
+                            <strong>{{ HOME_PAGE_COUNTERS_INFO.public_competitions|default:0 }}</strong>
+                            <span>public tests</span>
+                        </div>
+                        <div class="intro-metric-card">
+                            <strong>{{ HOME_PAGE_COUNTERS_INFO.submissions|default:0 }}</strong>
+                            <span>runs submitted</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="intro-link-panel">
+                    <div class="intro-link-card intro-link-card-static">
+                        <span class="intro-link-label">Platform capability</span>
+                        <strong>Train inside the platform or upload pre-trained artifacts for evaluation</strong>
+                        <p>Create a test, configure evaluation resources, and run validation workflows directly on the platform, or submit prepared models and prediction files to inspect leaderboard results without rebuilding the full pipeline each time.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <front-page-competitions></front-page-competitions>
-
-        <div id="action-container" class="segment-container ui segment full-width">
-            <div class="ui header">
-                What You Can Do Here
-            </div>
-            <div class="container-content">
-                <div class="center aligned column">
-                    <h3 class="ui icon header">
-                        <i class="flask icon"></i>
-                        Explore Tests
-                    </h3>
-                    <div>
-                        <p>Browse available tests, inspect requirements, and choose the evaluation flow that matches your use case.</p>
-                    </div>
-                </div>
-                <div class="center aligned column">
-                    <h3 class="ui icon header">
-                        <i class="upload icon"></i>
-                        Submit Artifacts
-                    </h3>
-                    <div>
-                        <p>Upload predictions, code, or other required files and let the platform run the configured evaluation pipeline.</p>
-                    </div>
-                </div>
-                <div class="center aligned column">
-                    <h3 class="ui icon header">
-                        <i class="tasks icon"></i>
-                        Manage Test Assets
-                    </h3>
-                    <div>
-                        <p>Maintain datasets, scoring resources, and related assets in one place so each test stays reproducible and easy to operate.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="ui three column grid" id="general-stats">
-            <div class="column">
-                <div class="ui statistic">
-                    <div class="value">{{ HOME_PAGE_COUNTERS_INFO.public_competitions }}</div>
-                    <div class="label">Public Tests</div>
-                </div>
-            </div>
-            <div class="column">
-                <div class="ui statistic">
-                    <div class="value">{{ HOME_PAGE_COUNTERS_INFO.users }}</div>
-                    <div class="label">Users</div>
-                </div>
-            </div>
-            <div class="column">
-                <div class="ui statistic">
-                    <div class="value">{{ HOME_PAGE_COUNTERS_INFO.submissions }}</div>
-                    <div class="label">Runs Submitted</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="about-container" class="segment-container ui segment full-width">
-            <div class="ui header">
-                Simple Evaluation Workflow
-            </div>
-            <div class="container-content">
-                <div class="ui three stackable cards">
-                    <div class="card">
-                        <div class="content">
-                            <div class="header">1. Pick a Test</div>
-                            <div class="description">
-                                Review the test description, required files, timeline, and output expectations before you start.
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="content">
-                            <div class="header">2. Upload and Run</div>
-                            <div class="description">
-                                Submit the requested artifact and let the platform evaluate it with the configured scoring flow.
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="content">
-                            <div class="header">3. Review Results</div>
-                            <div class="description">
-                                Inspect scores, outputs, and ranking-style summaries to compare runs and iterate quickly.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 {% endblock %}
 

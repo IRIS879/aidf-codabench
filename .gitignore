@@ -1,6 +1,10 @@
 *.pyc
 __pycache__
 .pytest_cache/
+pytest-cache-files-*/
+tmp_*_extract/
+tmp_*.md
+*_repacked.zip
 
 .env
 .envrc

@@ -55,49 +55,16 @@
                             <div class="ui" id="files">
                                 <div class="ui info message resources-message">
                                     <div class="header">Submission Resources</div>
-                                    <p>Download templates and sample packages here before preparing your submission.</p>
-                                    <div class="resources-group" if="{ competition.enable_model_card_submission }">
-                                        <div class="resources-group-title">Model Card Templates</div>
-                                        <div class="ui small buttons resource-buttons">
-                                            <a class="ui button"
-                                               href="/static/model-cards/model_card_template.docx"
-                                               target="_blank"
-                                               rel="noopener noreferrer">
-                                                <i class="download icon"></i>
-                                                DOCX Template
-                                            </a>
-                                            <a class="ui button"
-                                               href="/static/model-cards/model_card_template.json"
-                                               target="_blank"
-                                               rel="noopener noreferrer">
-                                                <i class="download icon"></i>
-                                                JSON Template
-                                            </a>
-                                            <a class="ui button"
-                                               href="/static/model-cards/model_card_template.md"
-                                               target="_blank"
-                                               rel="noopener noreferrer">
-                                                <i class="download icon"></i>
-                                                Markdown Template
-                                            </a>
-                                        </div>
-                                    </div>
+                                    <p>Download a real baseline submission package here before preparing your submission.</p>
                                     <div class="resources-group">
-                                        <div class="resources-group-title">Sample Submission Packages</div>
+                                        <div class="resources-group-title">Sample Submission Package</div>
                                         <div class="ui small buttons resource-buttons">
                                             <a class="ui button"
-                                               href="{ get_sample_submission_url('code-only') }"
+                                               href="{ get_sample_submission_url() }"
                                                target="_blank"
                                                rel="noopener noreferrer">
                                                 <i class="download icon"></i>
-                                                Code Only Sample
-                                            </a>
-                                            <a class="ui button"
-                                               href="{ get_sample_submission_url('with-model') }"
-                                               target="_blank"
-                                               rel="noopener noreferrer">
-                                                <i class="download icon"></i>
-                                                Sample with model.pkl
+                                                Baseline Logistic Regression Sample
                                             </a>
                                         </div>
                                     </div>
@@ -519,8 +486,8 @@
             return `/api/phases/${self.selected_phase_index}/leaderboard-pdf/`
         }
 
-        self.get_sample_submission_url = function (mode) {
-            return `/api/competitions/${self.competition.id}/sample-submission/?mode=${mode}`
+        self.get_sample_submission_url = function () {
+            return `/api/competitions/${self.competition.id}/sample-submission/`
         }
 
         self.update()

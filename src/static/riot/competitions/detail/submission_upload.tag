@@ -9,7 +9,7 @@
                         <h1 style="margin: 0;">Upload a new submission</h1>
                         <p class="submission-intro">
                             Add the required ZIP file, complete any required metadata, and submit to the active test phase.
-                            Download templates and sample packages from <strong>Overview → Resources</strong>.
+                            If this benchmark allows model card file uploads, the template downloads will appear directly in this submit panel.
                         </p>
                     </div>
                 </div>
@@ -80,8 +80,39 @@
                             <span class="mc-required-star">*</span>
                         </label>
 
+                        <div class="mc-helper-text">
+                            Provide the model card using the submission format enabled for this benchmark.
+                        </div>
+
+                        <div class="mc-template-box" if="{ supports_mc_upload() }">
+                            <div class="mc-template-title">Model Card Templates</div>
+                            <div class="ui small buttons resource-buttons">
+                                <a class="ui button"
+                                   href="/static/model-cards/model_card_template.docx"
+                                   target="_blank"
+                                   rel="noopener noreferrer">
+                                    <i class="download icon"></i>
+                                    DOCX Template
+                                </a>
+                                <a class="ui button"
+                                   href="/static/model-cards/model_card_template.json"
+                                   target="_blank"
+                                   rel="noopener noreferrer">
+                                    <i class="download icon"></i>
+                                    JSON Template
+                                </a>
+                                <a class="ui button"
+                                   href="/static/model-cards/model_card_template.md"
+                                   target="_blank"
+                                   rel="noopener noreferrer">
+                                    <i class="download icon"></i>
+                                    Markdown Template
+                                </a>
+                            </div>
+                        </div>
+
                         <!-- Tab switcher -->
-                        <div class="ui secondary pointing menu mc-tab-menu">
+                        <div class="ui secondary pointing menu mc-tab-menu" if="{ supports_mc_form() && supports_mc_upload() }">
                             <a class="item { active: mc_mode === 'form' }"
                                onclick="{ set_mc_mode_form }">
                                 Fill Form
@@ -93,7 +124,7 @@
                         </div>
 
                         <!-- Form fill mode -->
-                        <div class="mc-panel" if="{ mc_mode === 'form' }">
+                        <div class="mc-panel" if="{ supports_mc_form() && mc_mode === 'form' }">
                             <div class="mc-field">
                                 <label>Model Name <span class="mc-required-star">*</span></label>
                                 <input class="mc-input" type="text" ref="mc_model_name" placeholder="e.g. Cox-PH Baseline">
@@ -199,7 +230,7 @@
                         </div>
 
                         <!-- File upload mode -->
-                        <div class="mc-panel" if="{ mc_mode === 'upload' }">
+                        <div class="mc-panel" if="{ supports_mc_upload() && mc_mode === 'upload' }">
                             <div style="font-size:12px; color:rgba(0,0,0,.5); margin-bottom:6px;">
                                 Accepted formats: .pdf &nbsp;·&nbsp; .json &nbsp;·&nbsp; .md / .markdown
                             </div>
@@ -259,6 +290,28 @@
     // 'form' = fill-in-page, 'upload' = file upload
     self.mc_mode = 'form'
 
+    self.get_mc_submission_mode = function () {
+        return _.get(opts, 'competition.model_card_submission_mode') || 'both'
+    }
+
+    self.supports_mc_form = function () {
+        var mode = self.get_mc_submission_mode()
+        return mode === 'form' || mode === 'both'
+    }
+
+    self.supports_mc_upload = function () {
+        var mode = self.get_mc_submission_mode()
+        return mode === 'file' || mode === 'both'
+    }
+
+    self.sync_mc_mode = function () {
+        if (!self.supports_mc_form() && self.supports_mc_upload()) {
+            self.mc_mode = 'upload'
+        } else if (self.supports_mc_form()) {
+            self.mc_mode = 'form'
+        }
+    }
+
     self.show_optional = false
     self.toggle_optional = function () {
         self.show_optional = !self.show_optional
@@ -266,11 +319,13 @@
     }
 
     self.set_mc_mode_form = function () {
+        if (!self.supports_mc_form()) return
         self.mc_mode = 'form'
         self.update()
     }
 
     self.set_mc_mode_upload = function () {
+        if (!self.supports_mc_upload()) return
         self.mc_mode = 'upload'
         self.update()
     }
@@ -279,6 +334,7 @@
         console.log("[submission-upload] mounted")
         console.log("[submission-upload] opts.competition =", opts.competition)
         console.log("[submission-upload] opts.fact_sheet =", opts.fact_sheet)
+        self.sync_mc_mode()
 
         if (self.refs.organization_dropdown) {
             $(self.refs.organization_dropdown).dropdown()
@@ -310,6 +366,7 @@
         if (self.refs.mc_output)     self.refs.mc_output.value = ''
         if (self.refs.mc_overview)   self.refs.mc_overview.value = ''
 
+        self.sync_mc_mode()
         self.errors = {}
         self.update()
     }
@@ -389,10 +446,15 @@
         }
 
         var mc_required = opts.competition && opts.competition.enable_model_card_submission
+        var allow_mc_form = self.supports_mc_form()
+        var allow_mc_upload = self.supports_mc_upload()
         if (mc_required) {
             if (self.mc_mode === 'upload') {
+                if (!allow_mc_upload) {
+                    self.errors.model_card_file = "This benchmark only accepts model card form submissions"
+                }
                 // File upload mode
-                if (!model_card_file) {
+                else if (!model_card_file) {
                     self.errors.model_card_file = "Please select a model card file"
                 } else {
                     var mc_name = model_card_file.name.toLowerCase()
@@ -403,6 +465,9 @@
                     }
                 }
             } else {
+                if (!allow_mc_form) {
+                    self.errors.model_card_form_data = "This benchmark only accepts model card file uploads"
+                }
                 // Form fill mode
                 var mc_model_name = self.refs.mc_model_name ? self.refs.mc_model_name.value.trim() : ''
                 var mc_task       = self.refs.mc_task       ? self.refs.mc_task.value.trim()       : ''
@@ -461,6 +526,8 @@
             var model_card_file = model_card_input && model_card_input.files ? model_card_input.files[0] : null
 
             var mc_required = opts.competition && opts.competition.enable_model_card_submission
+            var allow_mc_form = self.supports_mc_form()
+            var allow_mc_upload = self.supports_mc_upload()
 
             console.log("[submission-upload] upload prediction_input =", prediction_input)
             console.log("[submission-upload] upload prediction_file =", prediction_file)
@@ -480,7 +547,7 @@
             }
 
             var mc_form_data_json = null
-            if (mc_required && self.mc_mode === 'form') {
+            if (mc_required && self.mc_mode === 'form' && allow_mc_form) {
                 // Helper: trim a ref's value or return null
                 function _str(ref) {
                     return (self.refs[ref] && self.refs[ref].value.trim()) || null
@@ -530,7 +597,7 @@
 
                 mc_form_data_json = JSON.stringify(card)
                 console.log("[submission-upload] upload mc_form_data_json =", mc_form_data_json)
-            } else if (mc_required && self.mc_mode === 'upload') {
+            } else if (mc_required && self.mc_mode === 'upload' && allow_mc_upload) {
                 if (!model_card_file) {
                     console.error("[submission-upload] No model card file found inside upload()")
                     self.errors.model_card_file = "Please select a model card file"
@@ -538,6 +605,16 @@
                     self.update()
                     return
                 }
+            } else if (mc_required && self.mc_mode === 'form' && !allow_mc_form) {
+                self.errors.model_card_form_data = "This benchmark only accepts model card file uploads"
+                self.is_submitting = false
+                self.update()
+                return
+            } else if (mc_required && self.mc_mode === 'upload' && !allow_mc_upload) {
+                self.errors.model_card_file = "This benchmark only accepts model card form submissions"
+                self.is_submitting = false
+                self.update()
+                return
             }
 
             var timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -656,6 +733,9 @@
                                     })
                                     console.error("[submission-upload] parsed errors =", errors)
                                     self.errors = errors
+                                    if (errors.data_file) {
+                                        toastr.error(errors.data_file)
+                                    }
                                     if (errors.model_card_file) {
                                         toastr.error(errors.model_card_file)
                                     }
@@ -796,6 +876,30 @@
     border 1px solid rgba(27, 63, 106, 0.10)
     border-radius 20px
     background linear-gradient(180deg, #f8fbff, #f4f8fd)
+
+.mc-helper-text
+    margin-bottom 10px
+    color #6180a3
+    font-size 13px
+    line-height 1.5
+
+.mc-template-box
+    margin-bottom 14px
+    padding 12px 14px
+    border-radius 16px
+    background rgba(255,255,255,0.78)
+    border 1px solid rgba(27, 63, 106, 0.08)
+
+.mc-template-title
+    margin-bottom 8px
+    color #35577d
+    font-size 13px
+    font-weight 700
+
+.resource-buttons
+    display flex
+    flex-wrap wrap
+    gap 8px
 
 .mc-required-star
     color #db2828

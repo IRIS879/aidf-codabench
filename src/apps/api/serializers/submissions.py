@@ -1,7 +1,9 @@
 import asyncio
+import io
 import json
 import logging
 from os.path import basename
+import zipfile
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -13,7 +15,7 @@ from api.mixins import DefaultUserCreateMixin
 from api.serializers import leaderboards
 from api.serializers.tasks import TaskSerializer
 from api.serializers.submission_leaderboard import SubmissionScoreSerializer
-from competitions.models import Submission, SubmissionDetails, CompetitionParticipant, Phase
+from competitions.models import Submission, SubmissionDetails, CompetitionParticipant, Phase, Competition
 from datasets.models import Data
 from utils.data import make_url_sassy
 from utils.model_card_parser import (
@@ -154,13 +156,39 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
             return basename(instance.data.data_file.name)
         return None
 
+    def _competition_allows_model_card_form(self, competition):
+        if not competition:
+            return True
+        return getattr(competition, "model_card_submission_mode", Competition.MODEL_CARD_SUBMISSION_BOTH) in {
+            Competition.MODEL_CARD_SUBMISSION_FORM,
+            Competition.MODEL_CARD_SUBMISSION_BOTH,
+        }
+
+    def _competition_allows_model_card_file(self, competition):
+        if not competition:
+            return True
+        return getattr(competition, "model_card_submission_mode", Competition.MODEL_CARD_SUBMISSION_BOTH) in {
+            Competition.MODEL_CARD_SUBMISSION_FILE,
+            Competition.MODEL_CARD_SUBMISSION_BOTH,
+        }
+
+    def _model_card_required_message(self, competition):
+        allow_form = self._competition_allows_model_card_form(competition)
+        allow_file = self._competition_allows_model_card_file(competition)
+        if allow_form and allow_file:
+            return "This competition requires a model card. Upload a .pdf, .json, or .md file, or fill in the form."
+        if allow_file:
+            return "This competition requires a model card file. Upload a .pdf, .json, or .md file."
+        if allow_form:
+            return "This competition requires a model card form. Please fill in the model card form."
+        return "This competition requires a model card."
+
     def _validate_model_card_file(self, uploaded_file):
         """Validate an uploaded model card file (PDF / JSON / Markdown)."""
         if not uploaded_file:
             raise serializers.ValidationError({
-                "model_card_file": (
-                    "This competition requires a model card. "
-                    "Upload a .pdf, .json, or .md file, or fill in the form."
+                "model_card_file": self._model_card_required_message(
+                    self.context.get("competition_for_validation")
                 )
             })
 
@@ -192,8 +220,84 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
         self._parsed_model_card_name = result["model_name"]
         self._parsed_model_card_json = result["parsed_json"]
 
-    # Backward-compat alias — existing tests call this name directly.
+    # Backward-compat alias – existing tests call this name directly.
     _validate_model_card_pdf = _validate_model_card_file
+
+    def _validate_submission_bundle(self, dataset):
+        """Lightweight pre-check to distinguish model bundles vs prediction bundles."""
+        if not dataset or not getattr(dataset, "data_file", None):
+            raise serializers.ValidationError({
+                "data_file": "This competition requires a submission ZIP file."
+            })
+
+        try:
+            dataset.data_file.open("rb")
+            bundle_bytes = dataset.data_file.read()
+        except Exception as exc:
+            logger.warning("Failed reading submission bundle for dataset=%s: %s", getattr(dataset, "pk", None), exc)
+            raise serializers.ValidationError({
+                "data_file": "We couldn't read your submission ZIP. Please re-zip the files and try again."
+            })
+        finally:
+            try:
+                dataset.data_file.close()
+            except Exception:
+                pass
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as zip_file:
+                file_entries = [
+                    name.replace("\\", "/").strip("/")
+                    for name in zip_file.namelist()
+                    if name and not name.endswith("/")
+                ]
+        except zipfile.BadZipFile:
+            raise serializers.ValidationError({
+                "data_file": "The uploaded file is not a valid ZIP archive. Please upload a real .zip file."
+            })
+
+        basenames = {
+            entry.rsplit("/", 1)[-1].lower()
+            for entry in file_entries
+            if entry
+        }
+
+        has_metadata = "metadata.yaml" in basenames or "metadata" in basenames
+        has_model_py = "model.py" in basenames
+        has_prediction_file = "predictions.csv" in basenames or "submission.csv" in basenames
+        has_model_markers = has_metadata or has_model_py
+
+        if has_model_markers and has_prediction_file:
+            raise serializers.ValidationError({
+                "data_file": (
+                    "Your ZIP contains both model files and prediction result files. "
+                    "Please submit either a model package or a prediction package, not both."
+                )
+            })
+
+        if has_model_markers:
+            if has_metadata and not has_model_py:
+                raise serializers.ValidationError({
+                    "data_file": (
+                        "This looks like a model submission, but it is missing: model.py. "
+                        "Please add the missing file and upload again."
+                    )
+                })
+            self._submission_bundle_type = "model"
+            return
+
+        if has_prediction_file:
+            self._submission_bundle_type = "prediction"
+            return
+
+        raise serializers.ValidationError({
+            "data_file": (
+                "We couldn't identify this submission package. "
+                "Please upload either a model package with model.py "
+                "(metadata.yaml is optional for legacy bundles), "
+                "or a prediction package with predictions.csv."
+            )
+        })
 
     def create(self, validated_data):
         tasks = validated_data.pop('tasks', None)
@@ -268,13 +372,22 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
             if not data.get("data"):
                 raise ValidationError("This competition requires a submission zip (data).")
 
+            self._validate_submission_bundle(data["data"])
+
             competition = data["phase"].competition
+            self.context["competition_for_validation"] = competition
+            allow_form = self._competition_allows_model_card_form(competition)
+            allow_file = self._competition_allows_model_card_file(competition)
             if getattr(competition, "enable_model_card_submission", False):
                 # Model card is required — accept either an uploaded file or form data.
                 uploaded_file = self.initial_data.get("model_card_file")
                 form_data_raw = self.initial_data.get("model_card_form_data", "")
 
                 if form_data_raw:
+                    if not allow_form:
+                        raise serializers.ValidationError(
+                            {"model_card_form_data": "This competition only accepts model card file uploads."}
+                        )
                     # Form-fill path: parse the JSON payload sent by the browser.
                     try:
                         form_dict = json.loads(form_data_raw)
@@ -295,23 +408,30 @@ class SubmissionCreationSerializer(DefaultUserCreateMixin, serializers.ModelSeri
                     self._uploaded_model_card_file = None
 
                 elif uploaded_file:
+                    if not allow_file:
+                        raise serializers.ValidationError(
+                            {"model_card_file": "This competition only accepts model card form submissions."}
+                        )
                     # File-upload path: validate and parse the uploaded file.
                     self._validate_model_card_file(uploaded_file)
                     self._uploaded_model_card_file = uploaded_file
 
                 else:
                     raise serializers.ValidationError({
-                        "model_card_file": (
-                            "This competition requires a model card. "
-                            "Upload a .pdf, .json, or .md file, or fill in the form."
-                        )
+                        "model_card_file": self._model_card_required_message(competition)
                     })
             else:
-                # Model card not required — accept an optional file silently.
+                # Model card feature disabled entirely for this competition.
                 uploaded_file = self.initial_data.get("model_card_file")
-                if uploaded_file:
-                    self._validate_model_card_file(uploaded_file)
-                    self._uploaded_model_card_file = uploaded_file
+                form_data_raw = self.initial_data.get("model_card_form_data", "")
+                if form_data_raw:
+                    raise serializers.ValidationError(
+                        {"model_card_form_data": "This competition does not accept model card submissions."}
+                    )
+                elif uploaded_file:
+                    raise serializers.ValidationError(
+                        {"model_card_file": "This competition does not accept model card submissions."}
+                    )
                 else:
                     self._uploaded_model_card_file = None
 

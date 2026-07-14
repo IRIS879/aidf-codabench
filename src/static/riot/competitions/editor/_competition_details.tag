@@ -98,10 +98,27 @@
 
       <div class="ui checkbox" style="margin-bottom: 10px;">
         <input type="checkbox" ref="enable_model_card_submission" onchange="{form_updated}">
-        <label>Require model card on submission (participants must fill in or upload a model card)</label>
+        <label>Require model card on submission</label>
       </div>
 
-      <div class="field required" style="margin-top: 10px;">
+      <div class="field required" style="margin-top: 10px;" show="{ data.enable_model_card_submission }">
+        <label>Model Card Submission Format</label>
+        <div ref="model_card_submission_mode" class="ui selection dropdown">
+          <input type="hidden" name="model_card_submission_mode" value="{ data.model_card_submission_mode || 'both' }" onchange="{form_updated}">
+          <div class="text">Form or file</div>
+          <i class="dropdown icon"></i>
+          <div class="menu">
+            <div class="item" data-value="form">Fill form only</div>
+            <div class="item" data-value="file">Upload file only</div>
+            <div class="item" data-value="both">Form or file</div>
+          </div>
+        </div>
+        <div class="ui tiny grey message" style="margin-top: 8px;">
+          Choose whether participants submit model cards by filling the in-page form, uploading a file, or either.
+        </div>
+      </div>
+
+      <div class="field required" style="margin-top: 10px;" show="{ data.enable_model_card_submission }">
         <label>Model Card Visibility</label>
         <div class="grouped fields" style="margin-top: 8px;">
           <div class="field">
@@ -392,6 +409,13 @@
         }
       })
 
+      $(self.refs.model_card_submission_mode).dropdown({
+        onChange: function () {
+          self.update()
+          self.form_updated()
+        }
+      })
+
       $(self.refs.queue).dropdown({
         apiSettings: {
           url: `${URLS.API}queues/?search={query}&public=true`,
@@ -428,14 +452,14 @@
       self.data.queue = self.refs.queue ? self.refs.queue.value : null
 
       self.data.training_mode = $(self.refs.training_mode).dropdown('get value') || 'static'
+      self.data.enable_model_card_submission = !!(self.refs.enable_model_card_submission && self.refs.enable_model_card_submission.checked)
+      self.data.model_card_submission_mode = $(self.refs.model_card_submission_mode).dropdown('get value') || 'both'
       var selected_visibility = self.root.querySelector('input[name="model_card_is_public"]:checked')
       if (selected_visibility) {
         self.data.model_card_is_public = selected_visibility.value === 'true'
       } else if (typeof self.data.model_card_is_public === 'undefined') {
         self.data.model_card_is_public = false
       }
-
-      self.data.enable_model_card_submission = !!(self.refs.enable_model_card_submission && self.refs.enable_model_card_submission.checked)
 
       self.data.enable_detailed_results = !!(self.refs.detailed_results && self.refs.detailed_results.checked)
       self.data.show_detailed_results_in_submission_panel = !!(self.refs.show_detailed_results_in_submission_panel && self.refs.show_detailed_results_in_submission_panel.checked)
@@ -599,6 +623,7 @@
       }
 
       if (self.refs.enable_model_card_submission) self.refs.enable_model_card_submission.checked = !!competition.enable_model_card_submission
+      $(self.refs.model_card_submission_mode).dropdown('set selected', competition.model_card_submission_mode || 'both')
       if (self.refs.detailed_results) self.refs.detailed_results.checked = !!competition.enable_detailed_results
       if (self.refs.show_detailed_results_in_submission_panel) self.refs.show_detailed_results_in_submission_panel.checked = !!competition.show_detailed_results_in_submission_panel
       if (self.refs.show_detailed_results_in_leaderboard) self.refs.show_detailed_results_in_leaderboard.checked = !!competition.show_detailed_results_in_leaderboard

@@ -2,6 +2,7 @@ import zipfile
 import json
 import csv
 import pickle
+from pathlib import Path
 from collections import OrderedDict
 from io import StringIO, BytesIO
 from django.http import HttpResponse
@@ -43,77 +44,18 @@ class CompetitionViewSet(ModelViewSet):
     queryset = Competition.objects.all()
     permission_classes = (AllowAny,)
 
-    def _build_sample_submission_zip(self, mode="code-only"):
-        metadata_yaml = "command: python /app/program/ingestion.py $input $output $submission_program\n"
-
-        code_only_model = """import numpy as np
-import pandas as pd
-
-
-class Model:
-    def __init__(self):
-        self.default_risk = 0.05
-
-    def fit(self, X_train, durations, events):
-        y = ((durations <= 12) & (events == 1)).astype(int)
-        self.default_risk = float(np.mean(y)) if len(y) > 0 else 0.05
-        return self
-
-    def predict_risk(self, X_test, horizons=[12]):
-        risk = np.full(len(X_test), self.default_risk, dtype=float)
-        return pd.DataFrame({"risk_12": risk})
-"""
-
-        pretrained_model = """import pickle
-import numpy as np
-import pandas as pd
-
-
-class Model:
-    def __init__(self):
-        self.state = None
-
-    def fit(self, X_train, durations, events):
-        # Example only: load a serialized artifact shipped in the ZIP package.
-        with open("model.pkl", "rb") as model_file:
-            self.state = pickle.load(model_file)
-        return self
-
-    def predict_risk(self, X_test, horizons=[12]):
-        risk_value = float(self.state.get("risk_constant", 0.05))
-        risk = np.full(len(X_test), risk_value, dtype=float)
-        return pd.DataFrame({"risk_12": risk})
-"""
-
-        readme = (
-            "Sample submission package for the US Default Prediction benchmark.\n\n"
-            "Required files:\n"
-            "- model.py\n"
-            "- metadata.yaml\n\n"
-            "Optional serialized artifact example:\n"
-            "- model.pkl\n\n"
-            "Required interface:\n"
-            "- fit(X_train, durations, events)\n"
-            "- predict_risk(X_test, horizons=[12])\n\n"
-            "Expected output:\n"
-            "- A pandas DataFrame with one column named risk_12.\n"
+    def _get_sample_submission_asset(self):
+        # Ship a real, working baseline bundle instead of a synthetic template ZIP.
+        sample_zip_path = (
+            Path(__file__).resolve().parents[1]
+            / "sample_submissions"
+            / "US3C_LR.zip"
         )
-
-        buffer = BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            zip_file.writestr("metadata.yaml", metadata_yaml)
-            zip_file.writestr("README.txt", readme)
-            if mode == "with-model":
-                zip_file.writestr("model.py", pretrained_model)
-                zip_file.writestr(
-                    "model.pkl",
-                    pickle.dumps({"risk_constant": 0.05}, protocol=pickle.HIGHEST_PROTOCOL),
-                )
-            else:
-                zip_file.writestr("model.py", code_only_model)
-
-        buffer.seek(0)
-        return buffer.getvalue()
+        if not sample_zip_path.exists():
+            raise ValidationError({
+                "sample_submission": f"Sample submission asset not found: {sample_zip_path}"
+            })
+        return sample_zip_path
 
     def _task_key_from_phase_item(self, item):
         if isinstance(item, dict):
@@ -192,17 +134,10 @@ class Model:
     @action(detail=True, methods=['get'], permission_classes=(AllowAny,), url_path='sample-submission')
     def sample_submission(self, request, pk=None):
         self.get_object()
-        mode = request.GET.get("mode", "code-only").lower()
-        if mode not in {"code-only", "with-model"}:
-            raise ValidationError({"mode": "mode must be either 'code-only' or 'with-model'."})
-
-        zip_bytes = self._build_sample_submission_zip(mode=mode)
+        sample_zip_path = self._get_sample_submission_asset()
+        zip_bytes = sample_zip_path.read_bytes()
         response = HttpResponse(zip_bytes, content_type="application/zip")
-        filename = (
-            "sample_submission_with_model.zip"
-            if mode == "with-model"
-            else "sample_submission_code_only.zip"
-        )
+        filename = sample_zip_path.name
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 

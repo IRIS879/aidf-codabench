@@ -2,19 +2,22 @@ import json
 import uuid
 from datetime import timedelta, date
 from io import BytesIO
+import zipfile
 from unittest import mock
 
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.test import APIRequestFactory
 
 from api.serializers.submissions import SubmissionCreationSerializer, extract_model_card_metadata
 from api.serializers.competitions import CompetitionSerializer
-from competitions.models import Submission
+from competitions.models import Submission, CompetitionParticipant
 from competitions.tasks import run_submission, submission_status_cleanup
 
-from factories import SubmissionFactory, UserFactory, CompetitionFactory, PhaseFactory, TaskFactory, LeaderboardFactory
+from factories import SubmissionFactory, UserFactory, CompetitionFactory, PhaseFactory, TaskFactory, LeaderboardFactory, DataFactory
 from leaderboards.models import Leaderboard
 
 
@@ -643,6 +646,246 @@ class ModelCardParsingTests(TestCase):
 
         assert "model_card_file" in exc.exception.detail
         assert "Model card parsing failed" in str(exc.exception.detail["model_card_file"][0])
+
+
+class ModelCardSubmissionModeTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = UserFactory(username="mc_mode_user")
+        self.competition = CompetitionFactory(created_by=self.user, enable_model_card_submission=True)
+        CompetitionParticipant.objects.update_or_create(
+            user=self.user,
+            competition=self.competition,
+            defaults={"status": CompetitionParticipant.APPROVED},
+        )
+        self.phase = PhaseFactory(competition=self.competition)
+        self.dataset = DataFactory(created_by=self.user, type="submission")
+
+    def _request(self):
+        request = self.factory.post("/api/submissions/")
+        request.user = self.user
+        return request
+
+    def _base_payload(self):
+        return {
+            "data": self.dataset.key,
+            "phase": self.phase.pk,
+        }
+
+    def _valid_form_payload(self):
+        return json.dumps({
+            "model_name": "Form Model",
+            "task": "Classification",
+            "output": "Risk score",
+            "overview": "A valid model card entered through the form.",
+        })
+
+    def _fake_model_card_file(self):
+        return SimpleUploadedFile("model_card.json", b'{"model_name": "Uploaded"}', content_type="application/json")
+
+    def _make_serializer(self, payload):
+        return SubmissionCreationSerializer(
+            data=payload,
+            context={"request": self._request()},
+        )
+
+    def test_required_file_only_mode_rejects_form_submission(self):
+        self.competition.model_card_submission_mode = self.competition.MODEL_CARD_SUBMISSION_FILE
+        self.competition.save(update_fields=["model_card_submission_mode"])
+
+        serializer = self._make_serializer({
+            **self._base_payload(),
+            "model_card_form_data": self._valid_form_payload(),
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("model_card_form_data", serializer.errors)
+
+    def test_required_form_only_mode_rejects_file_submission(self):
+        self.competition.model_card_submission_mode = self.competition.MODEL_CARD_SUBMISSION_FORM
+        self.competition.save(update_fields=["model_card_submission_mode"])
+
+        serializer = self._make_serializer({
+            **self._base_payload(),
+            "model_card_file": self._fake_model_card_file(),
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("model_card_file", serializer.errors)
+
+    def test_required_form_only_mode_accepts_form_submission(self):
+        self.competition.model_card_submission_mode = self.competition.MODEL_CARD_SUBMISSION_FORM
+        self.competition.save(update_fields=["model_card_submission_mode"])
+
+        serializer = self._make_serializer({
+            **self._base_payload(),
+            "model_card_form_data": self._valid_form_payload(),
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_disabled_model_card_rejects_form_submission(self):
+        self.competition.enable_model_card_submission = False
+        self.competition.model_card_submission_mode = self.competition.MODEL_CARD_SUBMISSION_FILE
+        self.competition.save(update_fields=["enable_model_card_submission", "model_card_submission_mode"])
+
+        serializer = self._make_serializer({
+            **self._base_payload(),
+            "model_card_form_data": self._valid_form_payload(),
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("model_card_form_data", serializer.errors)
+        self.assertIn("does not accept model card submissions", str(serializer.errors["model_card_form_data"][0]))
+
+    def test_disabled_model_card_rejects_uploaded_file(self):
+        self.competition.enable_model_card_submission = False
+        self.competition.model_card_submission_mode = self.competition.MODEL_CARD_SUBMISSION_FILE
+        self.competition.save(update_fields=["enable_model_card_submission", "model_card_submission_mode"])
+
+        serializer = self._make_serializer({
+            **self._base_payload(),
+            "model_card_file": self._fake_model_card_file(),
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("model_card_file", serializer.errors)
+        self.assertIn("does not accept model card submissions", str(serializer.errors["model_card_file"][0]))
+
+
+class SubmissionBundleValidationTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = UserFactory(username="bundle_validation_user")
+        self.competition = CompetitionFactory(created_by=self.user, enable_model_card_submission=False)
+        CompetitionParticipant.objects.update_or_create(
+            user=self.user,
+            competition=self.competition,
+            defaults={"status": CompetitionParticipant.APPROVED},
+        )
+        self.phase = PhaseFactory(competition=self.competition)
+
+    def _request(self):
+        request = self.factory.post("/api/submissions/")
+        request.user = self.user
+        return request
+
+    def _make_zip_bytes(self, files):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for path, content in files.items():
+                zip_file.writestr(path, content)
+        return buffer.getvalue()
+
+    def _make_dataset(self, name, content):
+        dataset = DataFactory(created_by=self.user, type="submission")
+        dataset.data_file.save(name, SimpleUploadedFile(name, content, content_type="application/zip"))
+        dataset.upload_completed_successfully = True
+        dataset.file_name = name
+        dataset.save(update_fields=["data_file", "upload_completed_successfully", "file_name", "file_size"])
+        return dataset
+
+    def _make_serializer(self, dataset):
+        return SubmissionCreationSerializer(
+            data={
+                "data": dataset.key,
+                "phase": self.phase.pk,
+            },
+            context={"request": self._request()},
+        )
+
+    def test_accepts_valid_model_submission_bundle(self):
+        dataset = self._make_dataset(
+            "model_submission.zip",
+            self._make_zip_bytes({
+                "metadata.yaml": "command: python model.py\n",
+                "model.py": "print('ok')\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_accepts_legacy_model_submission_without_metadata(self):
+        dataset = self._make_dataset(
+            "missing_metadata.zip",
+            self._make_zip_bytes({
+                "model.py": "print('ok')\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_rejects_model_submission_missing_model_py(self):
+        dataset = self._make_dataset(
+            "missing_model.zip",
+            self._make_zip_bytes({
+                "metadata.yaml": "command: python model.py\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("data_file", serializer.errors)
+        self.assertIn("model.py", str(serializer.errors["data_file"][0]))
+
+    def test_accepts_valid_prediction_submission_bundle(self):
+        dataset = self._make_dataset(
+            "prediction_submission.zip",
+            self._make_zip_bytes({
+                "predictions.csv": "id,prediction\n1,0.1\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_rejects_bundle_that_mixes_model_and_prediction_files(self):
+        dataset = self._make_dataset(
+            "mixed_bundle.zip",
+            self._make_zip_bytes({
+                "metadata.yaml": "command: python model.py\n",
+                "model.py": "print('ok')\n",
+                "predictions.csv": "id,prediction\n1,0.1\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("data_file", serializer.errors)
+        self.assertIn("both model files and prediction result files", str(serializer.errors["data_file"][0]))
+
+    def test_rejects_bundle_when_submission_type_is_unknown(self):
+        dataset = self._make_dataset(
+            "unknown_bundle.zip",
+            self._make_zip_bytes({
+                "README.txt": "hello\n",
+            }),
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("data_file", serializer.errors)
+        self.assertIn("couldn't identify this submission package", str(serializer.errors["data_file"][0]).lower())
+
+    def test_rejects_invalid_zip_archive(self):
+        dataset = self._make_dataset(
+            "broken_bundle.zip",
+            b"not-a-real-zip",
+        )
+
+        serializer = self._make_serializer(dataset)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("data_file", serializer.errors)
+        self.assertIn("not a valid zip archive", str(serializer.errors["data_file"][0]).lower())
 
 
 class TestSubmissionTasks(SubmissionTestCase):

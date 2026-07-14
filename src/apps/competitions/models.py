@@ -30,6 +30,9 @@ class Competition(models.Model):
     BENCHMARK = "benchmark"
     TRAINING_MODE_STATIC = "static"
     TRAINING_MODE_ROLLING = "rolling"
+    MODEL_CARD_SUBMISSION_FORM = "form"
+    MODEL_CARD_SUBMISSION_FILE = "file"
+    MODEL_CARD_SUBMISSION_BOTH = "both"
 
     COMPETITION_TYPE = (
         (COMPETITION, "competition"),
@@ -38,6 +41,11 @@ class Competition(models.Model):
     TRAINING_MODE_CHOICES = (
         (TRAINING_MODE_STATIC, "Static split"),
         (TRAINING_MODE_ROLLING, "Rolling window"),
+    )
+    MODEL_CARD_SUBMISSION_MODE_CHOICES = (
+        (MODEL_CARD_SUBMISSION_FORM, "Fill form only"),
+        (MODEL_CARD_SUBMISSION_FILE, "Upload file only"),
+        (MODEL_CARD_SUBMISSION_BOTH, "Form or file"),
     )
 
     title = models.CharField(max_length=256)
@@ -65,6 +73,13 @@ class Competition(models.Model):
     # --- Model card submission feature ---
     # If true, participants must include model_card.json in their submission zip
     enable_model_card_submission = models.BooleanField(default=False)
+
+    # Controls whether participants submit model cards via form, file, or either.
+    model_card_submission_mode = models.CharField(
+        max_length=16,
+        choices=MODEL_CARD_SUBMISSION_MODE_CHOICES,
+        default=MODEL_CARD_SUBMISSION_BOTH,
+    )
 
     # If true, model cards are downloadable by the public (otherwise host-only)
     model_card_is_public = models.BooleanField(default=False)
@@ -183,6 +198,18 @@ class Competition(models.Model):
             return True
         else:
             return user in self.all_organizers
+
+    def supports_model_card_form_submission(self):
+        return self.model_card_submission_mode in {
+            self.MODEL_CARD_SUBMISSION_FORM,
+            self.MODEL_CARD_SUBMISSION_BOTH,
+        }
+
+    def supports_model_card_file_submission(self):
+        return self.model_card_submission_mode in {
+            self.MODEL_CARD_SUBMISSION_FILE,
+            self.MODEL_CARD_SUBMISSION_BOTH,
+        }
 
     def apply_phase_migration(self, current_phase, next_phase, force_migration=False):
         """
@@ -517,7 +544,13 @@ class Submission(models.Model):
 
     description = models.CharField(max_length=240, default="", blank=True, null=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='submission', on_delete=models.DO_NOTHING)
-    organization = models.ForeignKey(Organization, related_name='submissions', on_delete=models.DO_NOTHING, null=True)
+    organization = models.ForeignKey(
+        Organization,
+        related_name='submissions',
+        on_delete=models.DO_NOTHING,
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=128, choices=STATUS_CHOICES, default=SUBMITTING, null=False, blank=False)
     status_details = models.TextField(null=True, blank=True)
     phase = models.ForeignKey(Phase, related_name='submissions', on_delete=models.CASCADE)
@@ -561,7 +594,11 @@ class Submission(models.Model):
                                              null=True,
                                              blank=True)
 
-    scores = models.ManyToManyField('leaderboards.SubmissionScore', related_name='submissions')
+    scores = models.ManyToManyField(
+        'leaderboards.SubmissionScore',
+        related_name='submissions',
+        blank=True,
+    )
 
     has_children = models.BooleanField(default=False)
     parent = models.ForeignKey('Submission', on_delete=models.CASCADE, blank=True, null=True, related_name='children')
